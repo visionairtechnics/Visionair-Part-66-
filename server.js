@@ -6,22 +6,23 @@ const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 
 function sanitizeJSON(text) {
-  // Remove markdown fences
   let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   
-  // Extract JSON object
   const start = clean.indexOf('{');
   const end = clean.lastIndexOf('}');
   if (start === -1 || end === -1) return null;
   clean = clean.substring(start, end + 1);
   
+  // Fix escaped forward slashes that break JSON arrays: "R\/I" -> "R/I"
+  clean = clean.replace(/\\\//g, '/');
+  
   // Replace problematic Unicode characters
   clean = clean
-    .replace(/[\u2018\u2019]/g, "'")   // curly single quotes
-    .replace(/[\u201C\u201D]/g, '"')   // curly double quotes
-    .replace(/[\u2013\u2014]/g, '-')   // em/en dashes
-    .replace(/[\u00A0]/g, ' ')         // non-breaking space
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ''); // control chars
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u00A0]/g, ' ')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
   
   return clean;
 }
@@ -61,9 +62,6 @@ const server = http.createServer(async (req, res) => {
 
         const data = await response.json();
         const rawText = data.content?.map(i => i.text || '').join('') || '';
-        
-        console.log('Raw response length:', rawText.length);
-        
         const cleanText = sanitizeJSON(rawText);
         
         if (!cleanText) {
@@ -72,17 +70,15 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        // Parse and re-serialize for guaranteed clean JSON
         let result;
         try {
           result = JSON.parse(cleanText);
         } catch(e) {
-          console.error('JSON parse error at:', e.message);
-          // Try to find error position and show context
           const pos = parseInt(e.message.match(/position (\d+)/)?.[1] || '0');
-          console.error('Context:', cleanText.substring(Math.max(0,pos-50), pos+50));
+          console.error('JSON parse error:', e.message);
+          console.error('Context:', cleanText.substring(Math.max(0,pos-80), pos+80));
           res.writeHead(200, {'Content-Type': 'application/json'});
-          res.end(JSON.stringify({error:{message:'Error parseando respuesta de Claude: ' + e.message}}));
+          res.end(JSON.stringify({error:{message:'Error parseando: ' + e.message}}));
           return;
         }
 
