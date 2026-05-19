@@ -1,6 +1,17 @@
 exports.handler = async (event, context) => {
-  // Extend timeout hint
   context.callbackWaitsForEmptyEventLoop = false;
+
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+      },
+      body: ''
+    };
+  }
 
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
@@ -10,15 +21,22 @@ exports.handler = async (event, context) => {
   if (!apiKey) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: { message: 'API key no configurada en Netlify. Añade ANTHROPIC_API_KEY en las variables de entorno.' } })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: { message: 'ANTHROPIC_API_KEY no configurada' } })
     };
   }
 
   let body;
-  try { body = JSON.parse(event.body); }
-  catch { return { statusCode: 400, body: JSON.stringify({ error: { message: 'JSON inválido en la petición' } }) }; }
+  try {
+    body = JSON.parse(event.body);
+  } catch (e) {
+    return {
+      statusCode: 400,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: { message: 'Error parseando body: ' + e.message } })
+    };
+  }
 
-  // Limit max_tokens to avoid timeout
   if (body.max_tokens > 2000) body.max_tokens = 2000;
 
   try {
@@ -32,19 +50,20 @@ exports.handler = async (event, context) => {
       body: JSON.stringify(body)
     });
 
-    const data = await response.json();
+    const text = await response.text();
     return {
       statusCode: response.status,
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       },
-      body: JSON.stringify(data)
+      body: text
     };
   } catch (err) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: { message: 'Error conectando con Anthropic: ' + err.message } })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: { message: 'Error: ' + err.message } })
     };
   }
 };
