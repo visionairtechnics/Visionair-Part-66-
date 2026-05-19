@@ -5,6 +5,27 @@ const path = require('path');
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 
+function sanitizeJSON(text) {
+  // Remove markdown fences
+  let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  
+  // Extract JSON object
+  const start = clean.indexOf('{');
+  const end = clean.lastIndexOf('}');
+  if (start === -1 || end === -1) return null;
+  clean = clean.substring(start, end + 1);
+  
+  // Replace problematic Unicode characters
+  clean = clean
+    .replace(/[\u2018\u2019]/g, "'")   // curly single quotes
+    .replace(/[\u201C\u201D]/g, '"')   // curly double quotes
+    .replace(/[\u2013\u2014]/g, '-')   // em/en dashes
+    .replace(/[\u00A0]/g, ' ')         // non-breaking space
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ''); // control chars
+  
+  return clean;
+}
+
 const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
@@ -39,28 +60,34 @@ const server = http.createServer(async (req, res) => {
         });
 
         const data = await response.json();
+        const rawText = data.content?.map(i => i.text || '').join('') || '';
         
-        // Extract text and clean it for safe JSON parsing
-        const text = data.content?.map(i => i.text || '').join('') || '';
-        const clean = text.replace(/```json|```/g, '').trim();
-        const match = clean.match(/\{[\s\S]*\}/);
+        console.log('Raw response length:', rawText.length);
         
-        if (!match) {
+        const cleanText = sanitizeJSON(rawText);
+        
+        if (!cleanText) {
           res.writeHead(200, {'Content-Type': 'application/json'});
-          res.end(JSON.stringify({error:{message:'Claude no devolvió JSON válido: ' + clean.substring(0,200)}}));
+          res.end(JSON.stringify({error:{message:'No se encontró JSON en la respuesta'}}));
           return;
         }
 
-        // Parse and re-serialize to ensure clean JSON
+        // Parse and re-serialize for guaranteed clean JSON
+        let result;
         try {
-          const result = JSON.parse(match[0]);
-          res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'});
-          res.end(JSON.stringify({content:[{type:'text',text:JSON.stringify(result)}]}));
-        } catch(parseErr) {
-          // Return raw but sanitized
-          res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'});
-          res.end(JSON.stringify({content:[{type:'text',text:match[0]}]}));
+          result = JSON.parse(cleanText);
+        } catch(e) {
+          console.error('JSON parse error at:', e.message);
+          // Try to find error position and show context
+          const pos = parseInt(e.message.match(/position (\d+)/)?.[1] || '0');
+          console.error('Context:', cleanText.substring(Math.max(0,pos-50), pos+50));
+          res.writeHead(200, {'Content-Type': 'application/json'});
+          res.end(JSON.stringify({error:{message:'Error parseando respuesta de Claude: ' + e.message}}));
+          return;
         }
+
+        res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'});
+        res.end(JSON.stringify(result));
 
       } catch(e) {
         console.error('Error:', e.message);
