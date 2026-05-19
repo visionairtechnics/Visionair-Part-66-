@@ -146,10 +146,7 @@ async function analyze(){
     const tx=data.content.map(i=>i.text||'').join('');
     await tick(5);
     if(!tx||tx.length<10){throw new Error('Respuesta vacía de la API. Intenta con un documento más pequeño.');}
-    const clean=tx.replace(/```json|```/g,'').trim();
-    const match=clean.match(/\{[\s\S]*\}/);
-    if(!match){throw new Error('Formato de respuesta inesperado: '+tx.substring(0,100));}
-    const rpt=JSON.parse(match[0]);
+    const rpt=JSON.parse(tx);
     setTimeout(()=>showReport(rpt),400);
   }catch(e){file=null;render('Error al analizar: '+e.message);}
 }
