@@ -1,4 +1,7 @@
 [build]
-  command = "echo ok"
+  command = "echo build"
   publish = "."
   functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
