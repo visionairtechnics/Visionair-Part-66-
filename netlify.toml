@@ -6,4 +6,5 @@
 [functions]
   node_bundler = "esbuild"
 
-# v3
+[functions."analizar"]
+  timeout = 26
