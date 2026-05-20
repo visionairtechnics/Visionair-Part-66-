@@ -208,10 +208,10 @@ const TIPO_LABELS={'INS':'Inspección','FOT':'Prueba Func.','SGH':'Servicio','R/
 const TIPO_MIN={'INS':0.70,'FOT':0.50,'SGH':0.50,'R/I':0.50,'MEL':0.25,'TS':0.25};
 
 const CATS={
-  "B1.1":{label:"B1.1 — Aviones turbina",       ojt:'AML B1',chap:'B1',m:{sin:60,rel:36,p147:24}},
-  "B1.2":{label:"B1.2 — Aviones pistón (Av. Gral.)",ojt:'AML B1',chap:'B1',m:{sin:36,rel:24,p147:12}},
-  "B1.3":{label:"B1.3 — Helicópteros turbina",  ojt:'AML B1',chap:'B1',m:{sin:60,rel:36,p147:24}},
-  "B2"  :{label:"B2 — Aviónica",                ojt:'AML B2',chap:'B2',m:{sin:60,rel:36,p147:24}}
+  "B1.1":{label:"B1.1 — Aviones turbina",       ojt:'AML B1',chap:'B1',m:{sin:60,rel:36,p147:24},nota:"Aviones con motor de turbina. Categoría incluye subcategoría A1 automáticamente."},
+  "B1.2":{label:"B1.2 — Aviones pistón (Av. Gral.)",ojt:'AML B1',chap:'B1',m:{sin:36,rel:24,p147:12},nota:"Aeronaves pistón no presurizadas. Requisitos reducidos vs B1.1 (Parte 66 Apéndice III)"},
+  "B1.3":{label:"B1.3 — Helicópteros turbina",  ojt:'AML B1',chap:'B1',m:{sin:60,rel:36,p147:24},nota:"Helicópteros con motor de turbina. Categoría incluye subcategoría A3 automáticamente."},
+  "B2"  :{label:"B2 — Aviónica",                ojt:'AML B2',chap:'B2',m:{sin:60,rel:36,p147:24},nota:"Sistemas eléctricos y aviónica. No incluye subcategoría A."}
 };
 const FORMACIONES={
   "sin":{label:"Sin formación técnica",sub:"Vía libre — mayor experiencia requerida",key:"sin"},
@@ -231,7 +231,7 @@ function getReqMonths(){
   return CATS[cat].m[FORMACIONES[form].key];
 }
 
-function buildPrompt(){
+function buildPrompt(){const tipoSol=window._tipoSol||"inicial";
   const cfg=CATS[cat];
   const fCfg=FORMACIONES[form];
   const reqM=getReqMonths();
@@ -257,10 +257,11 @@ REGLAS AESA OBLIGATORIAS:
 4. FIRMAS: firma del Resp. Mto o CC en CADA PÁGINA del formato (no en cada línea). Identifica páginas sin firma.
 5. VIGENCIA: experiencia dentro de los 10 años anteriores a la fecha de análisis.
 6. ENTRADAS CON PROBLEMAS: identifica entradas sin firma del supervisor, sin número de autorización, con descripción genérica (sin referencia a tarjeta/OT/AMM), o ilegibles.
-7. CANDIDATO: extrae el nombre del candidato del documento si aparece.
+7. CANDIDATO: extrae el nombre del candidato, el nombre de la organización de mantenimiento (MRO/OMA), el número de aprobación de la organización (ej. OMA 075, ES.145.XXXX), y los tipos de aeronave en los que se obtuvo la experiencia.
+8. TIPO SOLICITUD: ${tipoSol==="mod"?"MODIFICACIÓN de licencia — verifica que la experiencia es específica para la nueva categoría.":"EMISIÓN INICIAL de licencia."}
 
 RESPONDE SOLO con JSON válido sin markdown:
-{"candidato":"<nombre o null>","puntuacion":<0-100>,"estado":"conforme|atencion|critico","resumen":"<2-3 frases>","fechaAnalisis":"${todayStr}","configuracion":{"autoridad":"AESA","licencia":"${cat}","formacion":"${fCfg.label}","mesesRequeridos":${reqM},"rutaDetectada":"<ej: Nueva licencia ${cat} o B1.1→${cat}>","categoriaBase":"<si hay licencia previa, sino null>"},"verificacion":{"experienciaTotal":{"valor":<meses validos>,"requerido":${reqM},"ok":<bool>,"texto":"<desc breve>"},"experienciaReciente":{"valor":<meses últimos 12m>,"requerido":6,"ok":<bool>,"texto":"<desc breve>"},"coberturaATA":{"valor":<atas cubiertos>,"requerido":<total atas>,"ok":<bool>,"texto":"<desc breve>"},"firmasAuth":{"valor":<entradas con firma y auth validos>,"requerido":<total entradas>,"ok":<bool>,"texto":"<desc breve>"}},"experiencia":{"mesesValidos":<n>,"totalEntradas":<n>,"periodo":"<inicio> - <fin>","meses12":<n>,"meses7a":<n>,"recienteOk":<bool>},"mesesDetalle":[{"mes":"Ene 2023","tareas":<n>,"ok":<bool>}],"atas":[{"cod":"21","nombre":"Air conditioning","entradas":<n>,"estado":"ok|advertencia|critico|falta"}],"tiposTarea":{"INS":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"FOT":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"SGH":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"R/I":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"MEL":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"TS":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>}},"firmas":{"totalPaginas":<n>,"conFirma":<n>,"sinFirma":[<nums>]},"entradasProblemas":[{"num":<n>,"fecha":"dd/mm/yyyy","ata":"ATA XX","descripcion":"<desc breve>","supervisor":"<nombre o null>","numAuth":"<auth o null>","problema":"sin_firma|sin_auth|descripcion_generica|ilegible","estado":"critico|advertencia","comoCorregir":"<instrucción específica>"}],"alertas":[{"ref":"<ref>","desc":"<desc>","sev":"critico|advertencia|info","reg":"<ref AESA>"}],"acciones":[{"n":1,"tipo":"critico|importante|recomendado","titulo":"<titulo>","desc":"<desc>","comoCorregir":"<pasos específicos para solucionar>","entradasAfectadas":["<lista opcional de refs de entradas>"],"ref":"<ref AESA>"}]}`;
+{"candidato":"<nombre o null>","organizacion":"<nombre org o null>","numAprobacion":"<OMA/ES.145 o null>","aeronaves":["<tipo aeronave>"],"puntuacion":<0-100>,"estado":"conforme|atencion|critico","resumen":"<2-3 frases>","fechaAnalisis":"${todayStr}","configuracion":{"autoridad":"AESA","licencia":"${cat}","formacion":"${fCfg.label}","mesesRequeridos":${reqM},"rutaDetectada":"<ej: Nueva licencia ${cat} o B1.1→${cat}>","categoriaBase":"<si hay licencia previa, sino null>"},"verificacion":{"experienciaTotal":{"valor":<meses validos>,"requerido":${reqM},"ok":<bool>,"texto":"<desc breve>"},"experienciaReciente":{"valor":<meses últimos 12m>,"requerido":6,"ok":<bool>,"texto":"<desc breve>"},"coberturaATA":{"valor":<atas cubiertos>,"requerido":<total atas>,"ok":<bool>,"texto":"<desc breve>"},"firmasAuth":{"valor":<entradas con firma y auth validos>,"requerido":<total entradas>,"ok":<bool>,"texto":"<desc breve>"}},"experiencia":{"mesesValidos":<n>,"totalEntradas":<n>,"periodo":"<inicio> - <fin>","meses12":<n>,"meses7a":<n>,"recienteOk":<bool>},"mesesDetalle":[{"mes":"Ene 2023","tareas":<n>,"ok":<bool>}],"atas":[{"cod":"21","nombre":"Air conditioning","entradas":<n>,"estado":"ok|advertencia|critico|falta"}],"tiposTarea":{"INS":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"FOT":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"SGH":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"R/I":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"MEL":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"TS":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>}},"firmas":{"totalPaginas":<n>,"conFirma":<n>,"sinFirma":[<nums>]},"entradasProblemas":[{"num":<n>,"fecha":"dd/mm/yyyy","ata":"ATA XX","descripcion":"<desc breve>","supervisor":"<nombre o null>","numAuth":"<auth o null>","problema":"sin_firma|sin_auth|descripcion_generica|ilegible","estado":"critico|advertencia","comoCorregir":"<instrucción específica>"}],"alertas":[{"ref":"<ref>","desc":"<desc>","sev":"critico|advertencia|info","reg":"<ref AESA>"}],"acciones":[{"n":1,"tipo":"critico|importante|recomendado","titulo":"<titulo>","desc":"<desc>","comoCorregir":"<pasos específicos para solucionar>","entradasAfectadas":["<lista opcional de refs de entradas>"],"ref":"<ref AESA>"}]}`;
 }
 
 async function readFile(f){
@@ -347,6 +348,8 @@ function showReport(rpt){
   <div>
     ${rpt.candidato?`<p style="font-size:11px;color:var(--text2);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Candidato</p><p style="font-size:20px;font-weight:800;margin-bottom:4px;letter-spacing:-.02em">${rpt.candidato}</p>`:''}
     <p style="font-size:12px;color:var(--text3);font-family:monospace">${file?.name||''} · Analizado el ${rpt.fechaAnalisis||''}</p>
+    ${rpt.organizacion?`<p style="font-size:12px;color:var(--text2);margin-top:2px"><i class="ti ti-building" style="font-size:12px;vertical-align:-1px"></i> ${rpt.organizacion}${rpt.numAprobacion?' · '+rpt.numAprobacion:''}</p>`:''}
+    ${rpt.aeronaves?.length?`<p style="font-size:12px;color:var(--text2)"><i class="ti ti-plane" style="font-size:12px;vertical-align:-1px"></i> ${rpt.aeronaves.join(', ')}</p>`:''}
   </div>
   <div class="btn-group no-print">
     <button class="btn-out" onclick="window.print()"><i class="ti ti-printer"></i>Imprimir / PDF</button>
@@ -479,7 +482,9 @@ function render(err){
 <p class="up-sub">Sube el LIC-P66-P01-F02, selecciona la categoría y el tipo de formación del candidato para verificar el cumplimiento según los requisitos de AESA.</p>
 
 <div style="margin-bottom:1.5rem">
-  <p class="step-label">1. Categoría de licencia</p>
+  <p class="step-label">0. Tipo de solicitud</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:1.5rem">${[['inicial','Emisión inicial','Primera licencia P66'],['mod','Modificación','Ya tengo licencia P66']].map(([k,l,s])=>`<button class="sel-btn${window._tipoSol===k?' sel':''}" onclick="window.sTipo('${k}')"><span style="font-weight:700">${l}</span><span style="display:block;font-size:11px;color:var(--text3);font-weight:400;margin-top:1px">${s}</span></button>`).join('')}</div>
+<p class="step-label">1. Categoría de licencia</p>
   <div class="cat-grid">${Object.entries(CATS).map(([k,v])=>`<button class="sel-btn${cat===k?' sel':''}" onclick="window.sCat('${k}')">${v.label}</button>`).join('')}</div>
 </div>
 
@@ -523,6 +528,8 @@ ${err?`<div class="err-box"><i class="ti ti-alert-circle"></i>${err}</div>`:''}
   if(ab)ab.addEventListener('click',()=>{if(canGo)analyze();});
 }
 
+window._tipoSol=null;
+window.sTipo=t=>{window._tipoSol=t;render(null);};
 window.sCat=c=>{cat=c;render(null);};
 window.sForm=f=>{form=f;render(null);};
 render(null);
