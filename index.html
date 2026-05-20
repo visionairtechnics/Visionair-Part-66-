@@ -203,7 +203,6 @@ textarea.ctx-input::placeholder{color:var(--text3)}
 <div class="wrap"><div id="root"></div></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
 <script>
 // Theme
 const themeBtn=document.getElementById('themeBtn');
@@ -708,283 +707,158 @@ window.addCtx=txt=>{
   ta.focus();
 };
 
-window.descargarWord=async()=>{
-  const btn=document.getElementById('wordBtn');
-  if(btn){btn.disabled=true;btn.innerHTML='<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i>Generando...';}
-  try{
-    const rpt=window._lastRpt;
-    if(!rpt)throw new Error('No hay informe generado');
-    if(!window.docx)throw new Error('Librería docx no cargada. Recarga la página.');
-    
-    const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,
-           AlignmentType,HeadingLevel,BorderStyle,WidthType,ShadingType,
-           VerticalAlign,PageNumber,Header,Footer} = window.docx;
-    
-    const exp=rpt.experiencia||{};
-    const ver=rpt.verificacion||{};
-    const atas=rpt.atas||[];
-    const tt=rpt.tiposTarea||{};
-    const mes=rpt.mesesDetalle||[];
-    const alertas=rpt.alertas||[];
-    const plan=rpt.acciones||[];
-    const eps=rpt.entradasProblemas||[];
-    const TIPOS=['INS','FOT','SGH','R/I','MEL','TS'];
-    const TIPO_LABELS={'INS':'Inspección','FOT':'Prueba Func.','SGH':'Servicio','R/I':'Desm./Mont.','MEL':'MEL','TS':'Troublesh.'};
-    
-    const border={style:BorderStyle.SINGLE,size:1,color:'CCCCCC'};
-    const borders={top:border,bottom:border,left:border,right:border};
-    const noBorder={style:BorderStyle.NONE,size:0,color:'FFFFFF'};
-    const noBorders={top:noBorder,bottom:noBorder,left:noBorder,right:noBorder};
-    const cellMar={top:80,bottom:80,left:120,right:120};
-    
-    const h=(txt,lvl=1)=>new Paragraph({
-      heading:lvl===1?HeadingLevel.HEADING_1:HeadingLevel.HEADING_2,
-      children:[new TextRun({text:txt,bold:true,size:lvl===1?28:24,color:lvl===1?'1B2D5B':'333333',font:'Arial'})]
+window.descargarWord=()=>{
+  const rpt=window._lastRpt;
+  if(!rpt){alert('No hay informe generado.');return;}
+  const exp=rpt.experiencia||{};
+  const ver=rpt.verificacion||{};
+  const atas=rpt.atas||[];
+  const tt=rpt.tiposTarea||{};
+  const mes=rpt.mesesDetalle||[];
+  const alertas=rpt.alertas||[];
+  const plan=rpt.acciones||[];
+  const eps=rpt.entradasProblemas||[];
+  const TIPOS=['INS','FOT','SGH','R/I','MEL','TS'];
+  const TIPO_LABELS={'INS':'Inspeccion','FOT':'Prueba Func.','SGH':'Servicio','R/I':'Desm./Mont.','MEL':'MEL','TS':'Troublesh.'};
+  const stCol=rpt.estado==='conforme'?'#1a7a30':rpt.estado==='critico'?'#c5221f':'#856404';
+  const stLbl=rpt.estado==='conforme'?'CONFORME':'REQUIERE ATENCION';
+  const reqM=getReqMonths();
+  const mv=exp.mesesValidos||0;
+
+  const h1=t=>'<h1 style="color:#1b2d5b;font-size:16pt;margin:18pt 0 4pt;border-bottom:2px solid #1b2d5b;padding-bottom:3pt">'+t+'</h1>';
+  const h2=t=>'<h2 style="color:#1b2d5b;font-size:13pt;margin:14pt 0 4pt">'+t+'</h2>';
+  const kv=(k,v)=>'<p style="margin:3pt 0"><b>'+k+':</b> '+(v||'—')+'</p>';
+  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  let html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
+  html+='<head><meta charset="UTF-8"><title>Informe Part-66 AESA</title>';
+  html+='<style>body{font-family:Arial,sans-serif;font-size:11pt;color:#222;margin:2cm}';
+  html+='table{border-collapse:collapse;width:100%;margin:8pt 0}';
+  html+='th{background:#1b2d5b;color:white;padding:5pt 8pt;text-align:left;font-size:9pt}';
+  html+='td{padding:4pt 8pt;border:1px solid #ddd;font-size:9pt;vertical-align:top}';
+  html+='tr:nth-child(even) td{background:#f9f9f9}';
+  html+='.ok{color:#1a7a30;font-weight:bold}.warn{color:#856404;font-weight:bold}.err{color:#c5221f;font-weight:bold}';
+  html+='.mpill-ok{background:#d4edda;color:#1a5c25;border:1px solid #1a7a30;padding:2pt 6pt;border-radius:10pt;font-size:9pt;display:inline-block;margin:2pt}';
+  html+='.mpill-no{background:#f5f5f5;color:#888;border:1px solid #ccc;padding:2pt 6pt;border-radius:10pt;font-size:9pt;display:inline-block;margin:2pt}';
+  html+='</style></head><body>';
+
+  // Header
+  html+='<p style="color:#8898aa;font-size:8pt;font-weight:bold;letter-spacing:1pt">VISIONAIR TRAINING CENTER</p>';
+  html+='<h1 style="color:#1b2d5b;font-size:20pt;margin:0 0 4pt">Verificador de Experiencia Part-66 · AESA</h1>';
+  html+='<p style="color:#888;font-size:9pt">Analizado el '+esc(rpt.fechaAnalisis)+' · '+esc(file?.name||'')+' · Categoria '+cat+'</p>';
+  if(rpt.candidato)html+='<p style="color:#8898aa;font-size:8pt;margin:8pt 0 2pt"><b>CANDIDATO</b></p><h2 style="color:#1b2d5b;font-size:18pt;margin:0 0 6pt">'+esc(rpt.candidato)+'</h2>';
+  if(rpt.organizacion)html+='<p style="margin:2pt 0"><b>Organizacion:</b> '+esc(rpt.organizacion)+(rpt.numAprobacion?' &nbsp;·&nbsp; '+esc(rpt.numAprobacion):'')+'</p>';
+  if(rpt.aeronaves&&rpt.aeronaves.length)html+='<p style="margin:2pt 0"><b>Aeronaves:</b> '+esc(rpt.aeronaves.join(', '))+'</p>';
+  html+='<hr style="border:none;border-top:2px solid #1b2d5b;margin:10pt 0">';
+  
+  // Status
+  html+='<div style="background:'+(rpt.estado==='conforme'?'#d4edda':rpt.estado==='critico'?'#fce8e6':'#fff3cd')+';border:2px solid '+stCol+';padding:10pt;margin:10pt 0">';
+  html+='<span style="font-weight:bold;font-size:14pt;color:'+stCol+'">'+esc(stLbl)+' &nbsp; '+esc(rpt.puntuacion)+'%</span>';
+  if(rpt.resumen)html+='<br><span style="font-size:10pt;color:#444;font-style:italic">'+esc(rpt.resumen)+'</span>';
+  html+='</div>';
+
+  // Config
+  html+=h1('Configuracion del Analisis');
+  html+='<table><tr><th>Autoridad</th><th>Categoria</th><th>Formacion</th><th>Meses requeridos</th><th>Periodo</th></tr>';
+  html+='<tr><td>AESA</td><td>'+esc(cat)+'</td><td>'+esc(FORMACIONES[form]?.label||'')+'</td><td>'+reqM+' meses</td><td>'+esc(exp.periodo||'—')+'</td></tr></table>';
+  if(rpt.configuracion?.rutaDetectada)html+='<p>'+kv('Ruta detectada',esc(rpt.configuracion.rutaDetectada))+'</p>';
+
+  // Verification
+  html+=h1('Verificacion Part-66');
+  const verItems=[['experienciaTotal','Experiencia Total','Part-66.A.30(e)'],['experienciaReciente','Experiencia Reciente','AMC 66.A.30(d)'],['coberturaATA','Cobertura ATA','AMC 66.A.20(b)'],['firmasAuth','Firmas y Autorizaciones','Part-66.A.20(a)']];
+  html+='<table><tr><th>Check</th><th>Resultado</th><th>Descripcion</th><th>Referencia</th></tr>';
+  verItems.forEach(([k,lbl,ref])=>{
+    const v=ver[k];if(!v)return;
+    const ic=v.ok?'OK':v.ok===false?'NO CUMPLE':'ATENCION';
+    const col=v.ok?'ok':v.ok===false?'err':'warn';
+    html+='<tr><td>'+esc(lbl)+'</td><td class="'+col+'">'+ic+' ('+esc(v.valor)+'/'+esc(v.requerido)+')</td><td>'+esc(v.texto||'')+'</td><td style="font-size:8pt;font-family:Courier New">'+esc(ref)+'</td></tr>';
+  });
+  html+='</table>';
+
+  // Months
+  html+=h1('Meses del Registro');
+  html+='<p style="font-size:9pt;color:#666">Verde = ≥5 tareas en dias distintos &nbsp;·&nbsp; '+mv+'/'+reqM+' meses validos</p>';
+  html+='<p>';
+  mes.forEach(m=>{html+='<span class="'+(m.ok?'mpill-ok':'mpill-no')+'">'+esc(m.mes)+'</span> ';});
+  html+='</p>';
+
+  // OJT
+  if(Object.keys(tt).length){
+    html+=h1('Tipos de Tarea OJT — Ratios Globales');
+    html+='<table><tr><th>Tipo</th><th>Descripcion</th><th>Ratio</th><th>Minimo</th><th>Realizadas/Req.</th><th>Estado</th></tr>';
+    TIPOS.forEach(t=>{
+      const d=tt[t]||{};const pct=d.ratio!=null?Math.round(d.ratio*100):0;
+      const min=Math.round((TIPO_MIN[t]||0)*100);const ok=d.ok!==undefined?d.ok:pct>=min;
+      html+='<tr><td><b>'+t+'</b></td><td>'+esc(TIPO_LABELS[t])+'</td><td class="'+(ok?'ok':pct>=min*.7?'warn':'err')+'">'+pct+'%</td><td>'+min+'%</td><td>'+esc(d.realizadas||'?')+'/'+esc(d.requeridas||'?')+'</td><td class="'+(ok?'ok':pct>=min*.7?'warn':'err')+'">'+(ok?'OK':pct>=min*.7?'LIMITE':'INCUMPLE')+'</td></tr>';
     });
-    
-    const p=(txt,opts={})=>new Paragraph({
-      spacing:{after:opts.after||120},
-      children:[new TextRun({text:txt,size:opts.size||22,bold:opts.bold||false,color:opts.color||'333333',font:'Arial',italics:opts.italic||false})]
-    });
-    
-    const kv=(key,val,valColor='333333')=>new Paragraph({
-      spacing:{after:80},
-      children:[
-        new TextRun({text:key+': ',bold:true,size:20,color:'666666',font:'Arial'}),
-        new TextRun({text:val||'—',size:20,color:valColor,font:'Arial',bold:!!valColor&&valColor!=='333333'})
-      ]
-    });
-    
-    const divider=()=>new Paragraph({
-      border:{bottom:{style:BorderStyle.SINGLE,size:4,color:'1B2D5B',space:1}},
-      spacing:{after:160},children:[new TextRun('')]
-    });
-    
-    const stateColor=rpt.estado==='conforme'?'1A7A30':rpt.estado==='critico'?'C5221F':'856404';
-    const stateLabel=rpt.estado==='conforme'?'CONFORME — LISTO PARA PRESENTAR':rpt.estado==='critico'?'ACCIÓN URGENTE — NO PRESENTAR SIN CORREGIR':'REQUIERE ATENCIÓN — REVISA ANTES DE PRESENTAR';
-    const reqM=getReqMonths();
-    const mv=exp.mesesValidos||0;
-    
-    // ATA table rows
-    const ataRows=[
-      new TableRow({
-        tableHeader:true,
-        children:['ATA','Nombre','Entradas','Estado'].map((h,i)=>new TableCell({
-          borders,shading:{fill:'1B2D5B',type:ShadingType.CLEAR},
-          width:{size:[800,5000,1200,1600][i],type:WidthType.DXA},
-          margins:cellMar,
-          children:[new Paragraph({children:[new TextRun({text:h,bold:true,size:18,color:'FFFFFF',font:'Arial'})]})]
-        }))
-      }),
-      ...atas.map((a,i)=>new TableRow({
-        children:[
-          new TableCell({borders,width:{size:800,type:WidthType.DXA},margins:cellMar,shading:{fill:i%2===0?'F5F5F5':'FFFFFF',type:ShadingType.CLEAR},children:[new Paragraph({children:[new TextRun({text:'ATA '+a.cod,size:18,font:'Courier New'})]})] }),
-          new TableCell({borders,width:{size:5000,type:WidthType.DXA},margins:cellMar,shading:{fill:i%2===0?'F5F5F5':'FFFFFF',type:ShadingType.CLEAR},children:[new Paragraph({children:[new TextRun({text:a.nombre||'',size:18,font:'Arial'})]})] }),
-          new TableCell({borders,width:{size:1200,type:WidthType.DXA},margins:cellMar,shading:{fill:i%2===0?'F5F5F5':'FFFFFF',type:ShadingType.CLEAR},children:[new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:(a.entradas||0)+'t',size:18,font:'Arial'})]})] }),
-          new TableCell({borders,width:{size:1600,type:WidthType.DXA},margins:cellMar,shading:{fill:{ok:'D4EDDA',advertencia:'FFF3CD',critico:'FCE8E6',falta:'F5F5F5'}[a.estado]||'F5F5F5',type:ShadingType.CLEAR},children:[new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:{ok:'✓ Cubierto',advertencia:'⚠ Parcial',critico:'✗ Crítico',falta:'— Sin datos'}[a.estado]||a.estado,size:18,font:'Arial',color:{ok:'1A7A30',advertencia:'856404',critico:'C5221F',falta:'888888'}[a.estado]||'333333'})]})] })
-        ]
-      }))
-    ];
-    
-    // Entry problems table
-    const epsRows=eps.length?[
-      new TableRow({tableHeader:true,children:['Nº','Fecha','ATA','Descripción','Supervisor','Auth.','Problema'].map((h,i)=>new TableCell({
-        borders,shading:{fill:'1B2D5B',type:ShadingType.CLEAR},
-        width:{size:[500,1000,800,3000,2000,800,1200][i],type:WidthType.DXA},
-        margins:cellMar,
-        children:[new Paragraph({children:[new TextRun({text:h,bold:true,size:16,color:'FFFFFF',font:'Arial'})]})]
-      }))}),
-      ...eps.map(e=>new TableRow({children:[
-        new TableCell({borders,width:{size:500,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:String(e.num||'—'),size:16,font:'Arial'})]})] }),
-        new TableCell({borders,width:{size:1000,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:e.fecha||'—',size:16,font:'Arial'})]})] }),
-        new TableCell({borders,width:{size:800,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:e.ata||'—',size:16,bold:true,font:'Courier New'})]})] }),
-        new TableCell({borders,width:{size:3000,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:(e.descripcion||'—').substring(0,60),size:16,font:'Arial'})]})] }),
-        new TableCell({borders,width:{size:2000,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:e.supervisor||'—',size:16,font:'Arial'})]})] }),
-        new TableCell({borders,width:{size:800,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:e.numAuth||'—',size:16,font:'Arial'})]})] }),
-        new TableCell({borders,width:{size:1200,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:{'sin_firma':'Sin firma','sin_auth':'Sin nº auth.','descripcion_generica':'Desc. genérica','ilegible':'Ilegible'}[e.problema]||e.problema||'',size:16,font:'Arial',color:e.estado==='critico'?'C5221F':'856404'})]})] })
-      ]})
-    ]:[];
-    
-    const children=[
-      // Header
-      new Paragraph({spacing:{after:40},children:[new TextRun({text:'VISIONAIR TRAINING CENTER',size:18,color:'8898AA',font:'Arial',bold:true,allCaps:true})]}),
-      new Paragraph({spacing:{after:40},children:[new TextRun({text:'Verificador de Experiencia Part-66 · AESA',size:28,bold:true,color:'1B2D5B',font:'Arial'})]}),
-      new Paragraph({spacing:{after:200},children:[new TextRun({text:'Análisis generado el '+rpt.fechaAnalisis+' · '+file?.name,size:18,color:'888888',font:'Arial'})]}),
-      
-      // Candidate
-      ...(rpt.candidato?[
-        new Paragraph({spacing:{after:40},children:[new TextRun({text:'CANDIDATO',size:16,bold:true,color:'888888',font:'Arial',allCaps:true})]}),
-        new Paragraph({spacing:{after:60},children:[new TextRun({text:rpt.candidato,size:36,bold:true,color:'1B2D5B',font:'Arial'})]}),
-        ...(rpt.organizacion?[new Paragraph({spacing:{after:20},children:[new TextRun({text:'Organización: '+rpt.organizacion+(rpt.numAprobacion?' · '+rpt.numAprobacion:''),size:20,font:'Arial',color:'444444'})]})]:[]),
-        ...(rpt.aeronaves?.length?[new Paragraph({spacing:{after:160},children:[new TextRun({text:'Aeronaves: '+rpt.aeronaves.join(', '),size:20,font:'Arial',color:'444444'})]})]:[])
-      ]:[]),
-      
-      divider(),
-      
-      // Status banner
-      new Paragraph({
-        shading:{fill:rpt.estado==='conforme'?'D4EDDA':rpt.estado==='critico'?'FCE8E6':'FFF3CD',type:ShadingType.CLEAR},
-        border:{top:{style:BorderStyle.SINGLE,size:4,color:stateColor},bottom:{style:BorderStyle.SINGLE,size:4,color:stateColor},left:{style:BorderStyle.SINGLE,size:4,color:stateColor},right:{style:BorderStyle.SINGLE,size:4,color:stateColor}},
-        spacing:{before:80,after:80},
-        children:[new TextRun({text:stateLabel+' — '+rpt.puntuacion+'%',bold:true,size:24,color:stateColor,font:'Arial'})]
-      }),
-      new Paragraph({spacing:{after:80},children:[new TextRun({text:rpt.resumen||'',size:20,font:'Arial',italics:true,color:'444444'})]}),
-      
-      divider(),
-      
-      // Config
-      h('Configuración del Análisis',2),
-      kv('Categoría',cat),kv('Formación',FORMACIONES[form]?.label),
-      kv('Meses requeridos',reqM+' meses'),
-      ...(rpt.configuracion?.rutaDetectada?[kv('Ruta detectada',rpt.configuracion.rutaDetectada)]:[]),
-      kv('Periodo',exp.periodo),
-      
-      divider(),
-      
-      // Verification
-      h('Verificación Part-66',2),
-      ...Object.entries(ver).map(([k,v])=>{
-        if(!v)return null;
-        const labels={experienciaTotal:'Experiencia Total',experienciaReciente:'Experiencia Reciente',coberturaATA:'Cobertura ATA',firmasAuth:'Firmas y Autorizaciones'};
-        const refs={experienciaTotal:'Part-66.A.30(e)',experienciaReciente:'AMC 66.A.30(d)',coberturaATA:'AMC 66.A.20(b)',firmasAuth:'Part-66.A.20(a)'};
-        const ic=v.ok?'✓':v.ok===false?'✗':'⚠';
-        const col=v.ok?'1A7A30':v.ok===false?'C5221F':'856404';
-        return new Paragraph({
-          spacing:{after:100},
-          children:[
-            new TextRun({text:ic+' ',bold:true,size:22,color:col,font:'Arial'}),
-            new TextRun({text:(labels[k]||k)+': ',bold:true,size:22,font:'Arial',color:'1B2D5B'}),
-            new TextRun({text:(v.valor||'?')+'/'+(v.requerido||'?'),bold:true,size:22,color:col,font:'Arial'}),
-            new TextRun({text:' — '+v.texto,size:20,font:'Arial',color:'444444'}),
-            new TextRun({text:'  ('+refs[k]+')',size:18,font:'Arial',color:'888888',italics:true})
-          ]
-        });
-      }).filter(Boolean),
-      
-      divider(),
-      
-      // Months
-      h('Meses del Registro',2),
-      new Paragraph({spacing:{after:40},children:[new TextRun({text:'Verde = ≥5 tareas en días distintos · '+mv+'/'+reqM+' meses válidos',size:18,font:'Arial',color:'666666',italics:true})]}),
-      new Paragraph({
-        spacing:{after:160},
-        children:mes.map(m=>new TextRun({text:(m.ok?'[✓]':'[ ]')+' '+m.mes+'  ',size:18,color:m.ok?'1A7A30':'888888',font:'Courier New',bold:m.ok}))
-      }),
-      
-      divider(),
-      
-      // OJT
-      ...(Object.keys(tt).length?[
-        h('Tipos de Tarea OJT — Ratios Globales',2),
-        new Table({
-          width:{size:8600,type:WidthType.DXA},
-          columnWidths:[700,700,700,700,700,700,700,700,700,700,700,700].slice(0,TIPOS.length*2),
-          rows:[
-            new TableRow({children:TIPOS.map(t=>new TableCell({borders,width:{size:Math.floor(8600/TIPOS.length),type:WidthType.DXA},margins:cellMar,shading:{fill:'1B2D5B',type:ShadingType.CLEAR},children:[new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:t,bold:true,size:18,color:'FFFFFF',font:'Arial'})]})]})) }),
-            new TableRow({children:TIPOS.map(t=>{const d=tt[t]||{};const pct=d.ratio!=null?Math.round(d.ratio*100):0;const min=Math.round((TIPO_MIN[t]||0)*100);const ok=d.ok!==undefined?d.ok:pct>=min;const col=ok?'1A7A30':pct>=min*.7?'856404':'C5221F';const bg=ok?'D4EDDA':pct>=min*.7?'FFF3CD':'FCE8E6';return new TableCell({borders,width:{size:Math.floor(8600/TIPOS.length),type:WidthType.DXA},margins:cellMar,shading:{fill:bg,type:ShadingType.CLEAR},children:[new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:pct+'%',bold:true,size:22,color:col,font:'Arial'}),new TextRun({text:'min.'+min+'% '+(d.realizadas||'?')+'/'+(d.requeridas||'?'),size:14,color:'666666',font:'Arial'})]})]}); }) })
-          ]
-        }),
-        new Paragraph({spacing:{after:160},children:[new TextRun({text:TIPOS.map(t=>t+'='+TIPO_LABELS[t]).join(' · '),size:16,font:'Arial',color:'888888',italics:true})]})
-      ]:[]),
-      
-      divider(),
-      
-      // ATAs
-      ...(atas.length?[
-        h('Cobertura ATA · '+cat,2),
-        new Table({width:{size:8600,type:WidthType.DXA},columnWidths:[800,5000,1200,1600],rows:ataRows}),
-        new Paragraph({spacing:{after:160},children:[new TextRun('')]})
-      ]:[]),
-      
-      divider(),
-      
-      // Alerts
-      ...(alertas.length?[
-        h('Alertas',2),
-        ...alertas.map(a=>{
-          const sMap={critico:{col:'C5221F',lbl:'CRÍTICO'},advertencia:{col:'856404',lbl:'ADVERTENCIA'},info:{col:'1558D6',lbl:'INFO'}};
-          const sm=sMap[a.sev]||sMap.info;
-          return new Paragraph({
-            spacing:{after:120},
-            border:{left:{style:BorderStyle.SINGLE,size:8,color:sm.col,space:4}},
-            indent:{left:200},
-            children:[
-              new TextRun({text:'['+sm.lbl+'] ',bold:true,size:20,color:sm.col,font:'Arial'}),
-              new TextRun({text:(a.ref||'')+' — ',bold:true,size:20,font:'Arial',color:'1B2D5B'}),
-              new TextRun({text:a.desc||'',size:20,font:'Arial'}),
-              ...(a.reg?[new TextRun({text:'  '+a.reg,size:18,font:'Arial',color:'888888',italics:true})]:[])
-            ]
-          });
-        })
-      ]:[]),
-      
-      ...(alertas.length?[divider()]:[]),
-      
-      // Action Plan
-      ...(plan.length?[
-        h('Plan de Acción',2),
-        ...plan.flatMap(a=>{
-          const tMap={critico:{col:'C5221F',lbl:'URGENTE'},importante:{col:'856404',lbl:'IMPORTANTE'},recomendado:{col:'1558D6',lbl:'RECOMENDADO'}};
-          const tm=tMap[a.tipo]||tMap.recomendado;
-          return [
-            new Paragraph({
-              spacing:{after:60},
-              children:[
-                new TextRun({text:'0'+a.n+'. ',bold:true,size:22,color:tm.col,font:'Arial'}),
-                new TextRun({text:a.titulo,bold:true,size:22,font:'Arial',color:'1B2D5B'}),
-                new TextRun({text:'  ['+tm.lbl+']',size:18,font:'Arial',color:tm.col,bold:true})
-              ]
-            }),
-            new Paragraph({spacing:{after:60},indent:{left:360},children:[new TextRun({text:a.desc||'',size:20,font:'Arial',color:'444444'})]}),
-            ...(a.comoCorregir?[new Paragraph({spacing:{after:60},indent:{left:360},children:[new TextRun({text:'Cómo corregir: ',bold:true,size:20,font:'Arial',color:'1B2D5B'}),new TextRun({text:a.comoCorregir,size:20,font:'Arial',color:'444444'})]})]:[]),
-            ...(a.ref?[new Paragraph({spacing:{after:120},indent:{left:360},children:[new TextRun({text:a.ref,size:18,font:'Arial',color:'888888',italics:true})]})]:[])
-          ];
-        })
-      ]:[]),
-      
-      // Entry problems
-      ...(eps.length?[
-        divider(),
-        h('Entradas con Problemas',2),
-        new Table({width:{size:9300,type:WidthType.DXA},columnWidths:[500,1000,800,3000,2000,800,1200],rows:epsRows}),
-        new Paragraph({spacing:{after:160},children:[new TextRun({text:'Solo se muestran entradas con problemas identificados.',size:18,font:'Arial',color:'888888',italics:true})]})
-      ]:[]),
-      
-      // Footer note
-      divider(),
-      new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:'Análisis generado automáticamente por VisionAir Training Center · Este informe no garantiza la aprobación por parte de AESA',size:18,font:'Arial',color:'888888',italics:true})]})
-    ];
-    
-    const doc=new Document({
-      styles:{
-        default:{document:{run:{font:'Arial',size:22}}},
-        paragraphStyles:[
-          {id:'Heading1',name:'Heading 1',basedOn:'Normal',next:'Normal',quickFormat:true,run:{size:28,bold:true,font:'Arial',color:'1B2D5B'},paragraph:{spacing:{before:240,after:120},outlineLevel:0}},
-          {id:'Heading2',name:'Heading 2',basedOn:'Normal',next:'Normal',quickFormat:true,run:{size:24,bold:true,font:'Arial',color:'1B2D5B'},paragraph:{spacing:{before:180,after:80},outlineLevel:1}}
-        ]
-      },
-      sections:[{
-        properties:{page:{size:{width:11906,height:16838},margin:{top:1134,right:1134,bottom:1134,left:1134}}},
-        children
-      }]
-    });
-    
-    const buffer=await Packer.toBuffer(doc);
-    const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    const fname=(rpt.candidato?rpt.candidato.split(' ').slice(0,2).join('_'):'Informe')+'_Part66_'+cat+'_'+new Date().toISOString().slice(0,10)+'.docx';
-    a.download=fname;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-  }catch(e){
-    alert('Error al generar Word: '+e.message);
-  }finally{
-    const btn=document.getElementById('wordBtn');
-    if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-file-type-doc"></i>Descargar Word';}
+    html+='</table>';
   }
+
+  // ATAs
+  if(atas.length){
+    html+=h1('Cobertura ATA · '+cat);
+    html+='<table><tr><th>ATA</th><th>Nombre</th><th>Entradas</th><th>Estado</th></tr>';
+    atas.forEach(a=>{
+      const col={ok:'ok',advertencia:'warn',critico:'err',falta:''}[a.estado]||'';
+      const lbl={ok:'OK',advertencia:'Parcial',critico:'Critico',falta:'Sin datos'}[a.estado]||a.estado;
+      html+='<tr><td style="font-family:Courier New">ATA '+esc(a.cod)+'</td><td>'+esc(a.nombre)+'</td><td style="text-align:center">'+esc(a.entradas||0)+'</td><td class="'+col+'">'+lbl+'</td></tr>';
+    });
+    html+='</table>';
+  }
+
+  // Alerts
+  if(alertas.length){
+    html+=h1('Alertas');
+    alertas.forEach(a=>{
+      const col=a.sev==='critico'?'#fce8e6':a.sev==='advertencia'?'#fff3cd':'#e8f0fe';
+      const bc=a.sev==='critico'?'#c5221f':a.sev==='advertencia'?'#856404':'#1558d6';
+      html+='<div style="background:'+col+';border-left:4px solid '+bc+';padding:7pt 10pt;margin:6pt 0">';
+      html+='<b style="color:'+bc+'">'+esc(a.ref)+'</b> — '+esc(a.desc);
+      if(a.reg)html+='<br><span style="font-family:Courier New;font-size:8pt;color:#666">'+esc(a.reg)+'</span>';
+      html+='</div>';
+    });
+  }
+
+  // Action plan
+  if(plan.length){
+    html+=h1('Plan de Accion');
+    plan.forEach(a=>{
+      const col=a.tipo==='critico'?'#c5221f':a.tipo==='importante'?'#856404':'#1558d6';
+      const lbl=a.tipo==='critico'?'URGENTE':a.tipo==='importante'?'IMPORTANTE':'RECOMENDADO';
+      html+='<div style="border:1px solid #ddd;border-radius:5pt;padding:10pt;margin:8pt 0">';
+      html+='<p style="margin:0 0 5pt"><span style="background:'+col+';color:white;padding:2pt 8pt;border-radius:3pt;font-size:9pt">0'+esc(a.n)+'</span> &nbsp; <b style="font-size:12pt">'+esc(a.titulo)+'</b> <span style="color:'+col+';font-size:9pt;font-weight:bold"> ['+lbl+']</span></p>';
+      html+='<p style="color:#444;margin:4pt 0">'+esc(a.desc)+'</p>';
+      if(a.comoCorregir)html+='<p style="background:#f5f5f5;padding:6pt;border-left:3px solid #1b2d5b;margin:5pt 0"><b>Como corregir:</b> '+esc(a.comoCorregir)+'</p>';
+      if(a.ref)html+='<p style="font-family:Courier New;font-size:8pt;color:#888;margin:3pt 0">'+esc(a.ref)+'</p>';
+      html+='</div>';
+    });
+  }
+
+  // Entry problems
+  if(eps.length){
+    html+=h1('Entradas con Problemas');
+    html+='<table><tr><th>N</th><th>Fecha</th><th>ATA</th><th>Descripcion</th><th>Supervisor</th><th>Auth.</th><th>Problema</th></tr>';
+    eps.forEach(e=>{
+      const pm={'sin_firma':'Sin firma','sin_auth':'Sin num auth.','descripcion_generica':'Desc. generica','ilegible':'Ilegible'};
+      const col=e.estado==='critico'?'err':'warn';
+      html+='<tr><td>'+esc(e.num||'—')+'</td><td>'+esc(e.fecha||'—')+'</td><td style="font-family:Courier New;font-weight:bold">'+esc(e.ata||'—')+'</td><td>'+esc((e.descripcion||'—').substring(0,60))+'</td><td>'+esc(e.supervisor||'—')+'</td><td>'+esc(e.numAuth||'—')+'</td><td class="'+col+'">'+esc(pm[e.problema]||e.problema||'')+'</td></tr>';
+    });
+    html+='</table>';
+    html+='<p style="font-size:9pt;color:#888;font-style:italic">Solo se muestran entradas con problemas identificados.</p>';
+  }
+
+  html+='<hr style="border:none;border-top:1px solid #ddd;margin:16pt 0">';
+  html+='<p style="text-align:center;font-size:8pt;color:#888;font-style:italic">Analisis generado automaticamente por VisionAir Training Center · Este informe no garantiza la aprobacion por parte de AESA</p>';
+  html+='</body></html>';
+
+  const blob=new Blob(['\ufeff'+html],{type:'application/msword'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  const fname=(rpt.candidato?rpt.candidato.split(' ').slice(0,2).join('_'):'Informe')+'_Part66_'+cat+'_'+new Date().toISOString().slice(0,10)+'.doc';
+  a.download=fname;
+  a.click();
+  URL.revokeObjectURL(url);
 };
 
 window.toggleCtxPanel=()=>{
