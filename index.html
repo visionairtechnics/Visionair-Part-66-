@@ -281,6 +281,10 @@ function buildPrompt(){
     'NO te detengas antes del ultimo mes del documento. Revisa hasta diciembre si el documento llega hasta ahi.',
     'IMPORTANTE: el documento puede tener entradas hasta mayo de 2026. Analiza TODOS los meses hasta la ultima entrada.',
     'Si el documento tiene entradas en Oct, Nov, Dic 2025, esos meses DEBEN aparecer en mesesDetalle.',
+    'En mesesDetalle, el campo "tareas" = numero de DIAS UNICOS con entradas ese mes (no el total de entradas).',
+    'Para meses NO validos (menos de 5 dias unicos), incluye igualmente cuantos dias unicos tiene,',
+    'asi se puede ver si faltan 1, 2 o 3 dias para completar el mes. Ejemplo: {"mes":"Mar 2024","tareas":3,"ok":false}',
+    'significa que ese mes tiene 3 dias unicos con entradas, le faltan 2 para ser valido.',
     '',
     'REGLA 2 - EXPERIENCIA REQUERIDA: '+reqM+' meses validos via '+fCfg.label+'.',
     '',
@@ -401,6 +405,18 @@ function buildEvaluationPrompt(extracted, contextNote=''){
     '{"candidato":"'+( extracted.candidato||'')+'","organizacion":"'+(extracted.organizacion||'')+'","numAprobacion":"'+(extracted.numAprobacion||'')+'","aeronaves":'+(JSON.stringify(extracted.aeronaves||[]))+',"puntuacion":<0-100>,"estado":"conforme|atencion|critico","resumen":"<2-3 frases>","fechaAnalisis":"'+todayStr+'","configuracion":{"autoridad":"AESA","licencia":"'+cat+'","formacion":"'+fCfg.label+'","mesesRequeridos":'+reqM+',"rutaDetectada":"<ruta>","categoriaBase":null},"verificacion":{"experienciaTotal":{"valor":'+mv+',"requerido":'+reqM+',"ok":'+(mv>=reqM)+',"texto":"<desc>"},"experienciaReciente":{"valor":'+months12+',"requerido":6,"ok":'+(expReciente==='no'?'true':months12>=6)+',"texto":"<desc>"},"coberturaATA":{"valor":<n cubiertos>,"requerido":<n total>,"ok":<bool>,"texto":"<desc>"},"firmasAuth":{"valor":<n ok>,"requerido":'+extracted.totalEntradas+',"ok":<bool>,"texto":"<desc>"}},"experiencia":{"mesesValidos":'+mv+',"totalEntradas":'+extracted.totalEntradas+',"periodo":"'+(extracted.periodo?.inicio||'?')+' - '+(extracted.periodo?.fin||'?')+'","meses12":'+months12+',"meses7a":'+months7a+',"recienteOk":'+(expReciente==='no'?'true':months12>=6&&months7a>=6)+'},"mesesDetalle":<USA extracted.mesesDetalle con ok:true si diasConEntradas.length>=5>,"atas":[{"cod":"21","nombre":"Air conditioning","entradas":<n>,"estado":"ok|advertencia|critico|falta"}],"tiposTarea":{"INS":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"FOT":{...},"SGH":{...},"R/I":{...},"MEL":{...},"TS":{...}},"firmas":{"totalPaginas":'+(extracted.totalPaginas||0)+',"conFirma":<n>,"sinFirma":'+(JSON.stringify(extracted.paginasSinFirma||[]))+'},"entradasProblemas":[{"num":<n>,"fecha":"dd/mm/yyyy","ata":"ATA XX","descripcion":"<desc>","supervisor":"<nombre>","numAuth":"<auth>","problema":"sin_firma|sin_auth|descripcion_generica|ilegible","estado":"critico|advertencia","comoCorregir":"<instruccion>"}],"alertas":[{"ref":"<ref>","desc":"<desc>","sev":"critico|advertencia|info","reg":"<ref>"}],"acciones":[{"n":1,"tipo":"critico|importante|recomendado","titulo":"<titulo>","desc":"<desc>","comoCorregir":"<pasos>","entradasAfectadas":[],"ref":"<ref>"}]}'
   ];
   return lines2.filter(l=>l!=='').join('\n');
+}
+
+
+async function readFile(f){
+  const ext=f.name.split('.').pop().toLowerCase();
+  if(ext==='pdf')return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res({t:'pdf',d:r.result.split(',')[1]});r.onerror=rej;r.readAsDataURL(f);});
+  if(['xlsx','xls','csv'].includes(ext))return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'binary'});let tx='LIC-P66-P01-F02 — '+f.name+'\n\n';wb.SheetNames.forEach(n=>{tx+='=== '+n+' ===\n'+XLSX.utils.sheet_to_csv(wb.Sheets[n])+'\n\n';});res({t:'text',d:tx});}catch(err){rej(err);}};r.onerror=rej;r.readAsBinaryString(f);});
+  if(['docx','doc'].includes(ext)){
+    if(!window.mammoth)await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+    return new Promise((res,rej)=>{const r=new FileReader();r.onload=async e=>{try{const out=await window.mammoth.extractRawText({arrayBuffer:e.target.result});res({t:'text',d:out.value});}catch(e2){rej(e2);}};r.onerror=rej;r.readAsArrayBuffer(f);});
+  }
+  return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res({t:'text',d:e.target.result});r.onerror=rej;r.readAsText(f);});
 }
 
 async function analyze(){
@@ -539,7 +555,12 @@ ${isReevaluation?`<div class="final-badge"><i class="ti ti-rosette-discount-chec
 <!-- Meses -->
 ${mes.length?`<div class="sec">
   <div class="sec-title"><i class="ti ti-calendar-stats"></i>Meses del registro <span style="font-size:11px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">verde = ≥5 tareas en días distintos · ${mv}/${reqM} meses válidos</span></div>
-  <div class="months-wrap">${mes.map(m=>`<span class="mpill" style="background:${m.ok?'var(--ok-bg)':'var(--surface2)'};color:${m.ok?'var(--ok)':'var(--text3)'};border-color:${m.ok?'var(--ok-border)':'var(--border)'}" title="${m.tareas} tareas">${m.mes}</span>`).join('')}</div>
+  <div class="months-wrap">${mes.map(m=>{
+      const notOk=!m.ok&&m.tareas>0;
+      const label=m.mes+(notOk?' ('+m.tareas+'/5)':'');
+      const title=m.ok?(m.tareas+' dias unicos — valido'):(m.tareas>0?m.tareas+' dias unicos — faltan '+(5-m.tareas)+' para ser valido':'Sin entradas');
+      return `<span class="mpill" style="background:${m.ok?'var(--ok-bg)':m.tareas>0?'var(--warn-bg)':'var(--surface2)'};color:${m.ok?'var(--ok)':m.tareas>0?'var(--warn)':'var(--text3)'};border-color:${m.ok?'var(--ok-border)':m.tareas>0?'var(--warn-border)':'var(--border)'}" title="${title}">${label}</span>`;
+    }).join('')}</div>
 </div>`:''}
 
 <!-- OJT Tipos de tarea -->
@@ -751,7 +772,8 @@ window.descargarWord=()=>{
   html+='tr:nth-child(even) td{background:#f9f9f9}';
   html+='.ok{color:#1a7a30;font-weight:bold}.warn{color:#856404;font-weight:bold}.err{color:#c5221f;font-weight:bold}';
   html+='.mpill-ok{background:#d4edda;color:#1a5c25;border:1px solid #1a7a30;padding:2pt 6pt;border-radius:10pt;font-size:9pt;display:inline-block;margin:2pt}';
-  html+='.mpill-no{background:#f5f5f5;color:#888;border:1px solid #ccc;padding:2pt 6pt;border-radius:10pt;font-size:9pt;display:inline-block;margin:2pt}';
+  html+='.mpill-no{background:#f5f5f5;color:#888;border:1px solid #ccc;padding:2pt 6pt;border-radius:10pt;font-size:9pt;display:inline-block;margin:2pt}'+
+    '.mpill-warn{background:#fff3cd;color:#7a5500;border:1px solid #856404;padding:2pt 6pt;border-radius:10pt;font-size:9pt;display:inline-block;margin:2pt}';
   html+='</style></head><body>';
 
   // Header
@@ -791,7 +813,12 @@ window.descargarWord=()=>{
   html+=h1('Meses del Registro');
   html+='<p style="font-size:9pt;color:#666">Verde = ≥5 tareas en dias distintos &nbsp;·&nbsp; '+mv+'/'+reqM+' meses validos</p>';
   html+='<p>';
-  mes.forEach(m=>{html+='<span class="'+(m.ok?'mpill-ok':'mpill-no')+'">'+esc(m.mes)+'</span> ';});
+  mes.forEach(m=>{
+      const notOk=!m.ok&&m.tareas>0;
+      const label=esc(m.mes)+(notOk?' ('+m.tareas+'/5)':'');
+      const cls=m.ok?'mpill-ok':m.tareas>0?'mpill-warn':'mpill-no';
+      html+='<span class="'+cls+'">'+label+'</span> ';
+    });
   html+='</p>';
 
   // OJT
