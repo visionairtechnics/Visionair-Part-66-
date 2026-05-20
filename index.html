@@ -334,69 +334,67 @@ function buildEvaluationPrompt(extracted, contextNote=''){
   const fCfg=FORMACIONES[form];
   const reqM=getReqMonths();
   const expReciente=window._expReciente||'si';
-  const tipoSol=window._tipoSol||'inicial';
   const b12excl=cat==='B1.2'&&cfg.b12exclude?cfg.b12exclude:[];
   const chapters=CHAPTER_DATA[cfg.chap];
   const chapList=chapters.map(ch=>'ATA '+ch.cod+' | '+ch.nombre+' | Tipos OJT: '+ch.tipos.join(', ')).join('\n');
   const today=new Date();
-  const todayStr=today.getDate()+' de '+['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][today.getMonth()]+' de '+today.getFullYear();
+  const MNAMES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const todayStr=today.getDate()+' de '+MNAMES[today.getMonth()]+' de '+today.getFullYear();
   
-  // Calculate valid months from extracted data (deterministic)
-  const validMonths=extracted.mesesDetalle?extracted.mesesDetalle.filter(m=>m.diasConEntradas&&m.diasConEntradas.length>=5):[]; 
-  const validMonthsList=validMonths.map(m=>m.mes).join(', ');
+  // Deterministic month calculation from extracted data
+  const validMonths=(extracted.mesesDetalle||[]).filter(m=>m.diasConEntradas&&m.diasConEntradas.length>=5);
   const mv=validMonths.length;
+  const validList=validMonths.map(m=>m.mes).join(', ');
   
-  // Recent experience calculation (deterministic from extracted data)
-  const now=new Date(2026,4,20); // May 2026
-  const last12start=new Date(2025,4,20); // May 2025
-  const last7end=new Date(2025,4,19);  // Before last 12m
-  const last7start=new Date(2018,5,20); // June 2018
-  
+  // Recent experience (deterministic)
+  const last12start=new Date(2025,4,20);
+  const last7start=new Date(2018,5,20);
   let months12=0, months7a=0;
-  if(extracted.mesesDetalle){
-    extracted.mesesDetalle.forEach(m=>{
-      if(!m.diasConEntradas||m.diasConEntradas.length<5)return;
-      const [mes,anio]=m.mes.split(' ');
-      const mesMap={'Ene':0,'Feb':1,'Mar':2,'Abr':3,'May':4,'Jun':5,'Jul':6,'Ago':7,'Sep':8,'Oct':9,'Nov':10,'Dic':11};
-      const d=new Date(parseInt(anio),mesMap[mes]||0,1);
-      if(d>=last12start&&d<now)months12++;
-      else if(d>=last7start&&d<last12start)months7a++;
-    });
-  }
+  const MMAP={Ene:0,Feb:1,Mar:2,Abr:3,May:4,Jun:5,Jul:6,Ago:7,Sep:8,Oct:9,Nov:10,Dic:11};
+  validMonths.forEach(m=>{
+    const parts=m.mes.split(' ');
+    const d=new Date(parseInt(parts[1]),MMAP[parts[0]]||0,1);
+    if(d>=last12start)months12++;
+    else if(d>=last7start)months7a++;
+  });
   
-  return \`Eres inspector experto Parte 66 AESA. Fecha: \${todayStr}. Evalúa la experiencia para categoría \${cat} — \${cfg.label}. Formación: \${fCfg.label}. Meses requeridos: \${reqM}.
-
-DATOS YA EXTRAÍDOS DEL DOCUMENTO (usa estos datos, no los recuentes):
-- Candidato: \${extracted.candidato||'No identificado'}
-- Organización: \${extracted.organizacion||'No identificada'} \${extracted.numAprobacion||''}
-- Aeronaves: \${(extracted.aeronaves||[]).join(', ')}
-- Total entradas: \${extracted.totalEntradas}
-- Periodo: \${extracted.periodo?.inicio||'?'} - \${extracted.periodo?.fin||'?'}
-- Total páginas: \${extracted.totalPaginas}
-- Páginas sin firma: \${(extracted.paginasSinFirma||[]).join(', ')||'ninguna'}
-- MESES VÁLIDOS (≥5 días únicos con entradas): \${mv} meses → \${validMonthsList}
-- Meses en últimos 12 meses: \${months12}
-- Meses en años 2-7: \${months7a}
-- Supervisor principal: \${extracted.supervisor||'No identificado'}
-
-TIPOS DE TAREA OJT: INS=Inspección | FOT=Prueba funcional | SGH=Servicio | R/I=Desmontaje/montaje | MEL=Equipo mínimo | TS=Troubleshooting
-RATIOS MÍNIMOS: INS≥70% | FOT≥50% | SGH≥50% | R/I≥50% | MEL≥25% | TS≥25%
-
-CAPÍTULOS ATA APLICABLES PARA \${cat}:
-\${chapList}
-\${cat==='B1.2'&&b12excl.length?'ATAs NO aplicables para B1.2 (no penalizar su ausencia): '+b12excl.join(', '):''}
-
-INSTRUCCIONES:
-1. USA los meses válidos ya calculados (\${mv} meses). NO los recuentes. Solo indica cuáles son.
-2. EXPERIENCIA RECIENTE: \${expReciente==='si'?'EVALUAR: requiere ≥6 meses en últimos 12m + ≥6 en años 2-7. Últimos 12m: '+months12+' meses. Años 2-7: '+months7a+' meses.':'NO EVALUAR (modo potencial). Marca recienteOk=true.'}
-3. CLASIFICA cada entrada por ATA y tipo de tarea para calcular cobertura y ratios OJT.
-4. FIRMAS: el formato tiene firma al pie de cada página de tareas. Páginas sin firma: \${(extracted.paginasSinFirma||[]).join(', ')||'ninguna'}.
-5. TAREAS GENÉRICAS: SOLO marca como genérica si no tiene ningún detalle del sistema. Descripciones como "BATTERY REPLACEMENT", "50 HRS INSPECTION ATA 05", "MAIN WHEEL TIRE CHANGE" son ESPECÍFICAS.
-\${b12excl.length?'6. Para B1.2: NO exijas los ATAs '+b12excl.join(', ')+' (sistemas inexistentes en GA pistón).':''}
-\${contextNote?'7. CONTEXTO DEL EVALUADOR (tiene prioridad): '+contextNote:''}
-
-RESPONDE SOLO con JSON válido sin markdown:
-{"candidato":"<nombre>","organizacion":"<org>","numAprobacion":"<num>","aeronaves":["<tipo>"],"puntuacion":<0-100>,"estado":"conforme|atencion|critico","resumen":"<2-3 frases>","fechaAnalisis":"\${todayStr}","configuracion":{"autoridad":"AESA","licencia":"\${cat}","formacion":"\${fCfg.label}","mesesRequeridos":\${reqM},"rutaDetectada":"<ruta>","categoriaBase":null},"verificacion":{"experienciaTotal":{"valor":\${mv},"requerido":\${reqM},"ok":\${mv>=reqM},"texto":"<desc>"},"experienciaReciente":{"valor":\${months12},"requerido":6,"ok":\${expReciente==='no'?true:months12>=6},"texto":"<desc>"},"coberturaATA":{"valor":<n cubiertos>,"requerido":<n total aplicables>,"ok":<bool>,"texto":"<desc>"},"firmasAuth":{"valor":<entradas con firma+auth>,"requerido":\${extracted.totalEntradas},"ok":<bool>,"texto":"<desc>"}},"experiencia":{"mesesValidos":\${mv},"totalEntradas":\${extracted.totalEntradas},"periodo":"\${extracted.periodo?.inicio||'?'} - \${extracted.periodo?.fin||'?'}","meses12":\${months12},"meses7a":\${months7a},"recienteOk":\${expReciente==='no'?true:months12>=6&&months7a>=6}},"mesesDetalle":[<USA EXACTAMENTE los meses del array extracted.mesesDetalle con ok:true si diasConEntradas.length>=5>],"atas":[{"cod":"21","nombre":"Air conditioning","entradas":<n>,"estado":"ok|advertencia|critico|falta"}],"tiposTarea":{"INS":{"realizadas":<n>,"requeridas":<total_entries_where_this_type_is_required>,"ratio":<0-1>,"ok":<bool>},"FOT":{...},"SGH":{...},"R/I":{...},"MEL":{...},"TS":{...}},"firmas":{"totalPaginas":\${extracted.totalPaginas||0},"conFirma":<n>,"sinFirma":\${JSON.stringify(extracted.paginasSinFirma||[])}},"entradasProblemas":[{"num":<n>,"fecha":"dd/mm/yyyy","ata":"ATA XX","descripcion":"<desc>","supervisor":"<nombre>","numAuth":"<auth>","problema":"sin_firma|sin_auth|descripcion_generica|ilegible","estado":"critico|advertencia","comoCorregir":"<instruccion>"}],"alertas":[{"ref":"<ref>","desc":"<desc>","sev":"critico|advertencia|info","reg":"<ref>"}],"acciones":[{"n":1,"tipo":"critico|importante|recomendado","titulo":"<titulo>","desc":"<desc>","comoCorregir":"<pasos>","entradasAfectadas":[],"ref":"<ref>"}]}\`;
+  const lines2=[
+    'Eres inspector experto Parte 66 AESA. Fecha: '+todayStr+'. Evalua experiencia categoria '+cat+' — '+cfg.label+'.',
+    'Formacion: '+fCfg.label+'. Meses requeridos: '+reqM+'.',
+    '',
+    'TIPOS DE TAREA OJT: INS=Inspeccion | FOT=Prueba funcional | SGH=Servicio | R/I=Desmontaje y montaje | MEL=Equipo minimo | TS=Troubleshooting',
+    'RATIOS MINIMOS: INS>=70% | FOT>=50% | SGH>=50% | R/I>=50% | MEL>=25% | TS>=25%',
+    '',
+    'CAPITULOS ATA APLICABLES PARA '+cat+':',
+    chapList,
+    b12excl.length?'ATAs NO aplicables B1.2 (no penalizar): '+b12excl.join(', '):'',
+    '',
+    'DATOS PRE-EXTRAIDOS DEL DOCUMENTO (usa estos exactamente, no los recuentes):',
+    '- Candidato: '+(extracted.candidato||'No identificado'),
+    '- Organizacion: '+(extracted.organizacion||'No identificada')+' '+(extracted.numAprobacion||''),
+    '- Aeronaves: '+((extracted.aeronaves||[]).join(', ')||'No especificadas'),
+    '- Total entradas: '+extracted.totalEntradas,
+    '- Periodo: '+(extracted.periodo?.inicio||'?')+' - '+(extracted.periodo?.fin||'?'),
+    '- Total paginas: '+(extracted.totalPaginas||'?'),
+    '- Paginas sin firma: '+((extracted.paginasSinFirma||[]).join(', ')||'ninguna'),
+    '- MESES VALIDOS (>=5 dias unicos): '+mv+' meses — '+validList,
+    '- Meses ultimos 12m: '+months12,
+    '- Meses anos 2-7: '+months7a,
+    '- Supervisor principal: '+(extracted.supervisor||'No identificado'),
+    '',
+    'INSTRUCCIONES CRITICAS:',
+    '1. USA exactamente '+mv+' como mesesValidos. Los meses validos son: '+validList+'. NO los recuentes.',
+    '2. EXPERIENCIA RECIENTE: '+(expReciente==='si'?'EVALUAR. Ultimos 12m: '+months12+' (requiere 6). Anos 2-7: '+months7a+' (requiere 6).':'NO EVALUAR (modo potencial). Pon recienteOk=true.'),
+    '3. Clasifica cada entrada por ATA y tipo de tarea para calcular cobertura y ratios OJT.',
+    '4. FIRMAS: firma al pie de cada PAGINA de tareas (no en cada linea). Paginas sin firma: '+((extracted.paginasSinFirma||[]).join(', ')||'ninguna')+'.',
+    '5. TAREAS GENERICAS: solo marca generica si no tiene ningun detalle del sistema. BATTERY REPLACEMENT, 50 HRS INSPECTION ATA 05 son ESPECIFICAS.',
+    b12excl.length?'6. Para B1.2: NO exijas ATAs '+b12excl.join(', ')+'.':'',
+    contextNote?'7. CONTEXTO DEL EVALUADOR (prioridad maxima): '+contextNote:'',
+    '',
+    'RESPONDE SOLO con JSON valido sin markdown:',
+    '{"candidato":"'+( extracted.candidato||'')+'","organizacion":"'+(extracted.organizacion||'')+'","numAprobacion":"'+(extracted.numAprobacion||'')+'","aeronaves":'+(JSON.stringify(extracted.aeronaves||[]))+',"puntuacion":<0-100>,"estado":"conforme|atencion|critico","resumen":"<2-3 frases>","fechaAnalisis":"'+todayStr+'","configuracion":{"autoridad":"AESA","licencia":"'+cat+'","formacion":"'+fCfg.label+'","mesesRequeridos":'+reqM+',"rutaDetectada":"<ruta>","categoriaBase":null},"verificacion":{"experienciaTotal":{"valor":'+mv+',"requerido":'+reqM+',"ok":'+(mv>=reqM)+',"texto":"<desc>"},"experienciaReciente":{"valor":'+months12+',"requerido":6,"ok":'+(expReciente==='no'?'true':months12>=6)+',"texto":"<desc>"},"coberturaATA":{"valor":<n cubiertos>,"requerido":<n total>,"ok":<bool>,"texto":"<desc>"},"firmasAuth":{"valor":<n ok>,"requerido":'+extracted.totalEntradas+',"ok":<bool>,"texto":"<desc>"}},"experiencia":{"mesesValidos":'+mv+',"totalEntradas":'+extracted.totalEntradas+',"periodo":"'+(extracted.periodo?.inicio||'?')+' - '+(extracted.periodo?.fin||'?')+'","meses12":'+months12+',"meses7a":'+months7a+',"recienteOk":'+(expReciente==='no'?'true':months12>=6&&months7a>=6)+'},"mesesDetalle":<USA extracted.mesesDetalle con ok:true si diasConEntradas.length>=5>,"atas":[{"cod":"21","nombre":"Air conditioning","entradas":<n>,"estado":"ok|advertencia|critico|falta"}],"tiposTarea":{"INS":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"FOT":{...},"SGH":{...},"R/I":{...},"MEL":{...},"TS":{...}},"firmas":{"totalPaginas":'+(extracted.totalPaginas||0)+',"conFirma":<n>,"sinFirma":'+(JSON.stringify(extracted.paginasSinFirma||[]))+'},"entradasProblemas":[{"num":<n>,"fecha":"dd/mm/yyyy","ata":"ATA XX","descripcion":"<desc>","supervisor":"<nombre>","numAuth":"<auth>","problema":"sin_firma|sin_auth|descripcion_generica|ilegible","estado":"critico|advertencia","comoCorregir":"<instruccion>"}],"alertas":[{"ref":"<ref>","desc":"<desc>","sev":"critico|advertencia|info","reg":"<ref>"}],"acciones":[{"n":1,"tipo":"critico|importante|recomendado","titulo":"<titulo>","desc":"<desc>","comoCorregir":"<pasos>","entradasAfectadas":[],"ref":"<ref>"}]}'
+  ];
+  return lines2.filter(l=>l!=='').join('\n');
 }
 
 async function analyze(){
