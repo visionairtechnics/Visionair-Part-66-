@@ -246,57 +246,64 @@ function getReqMonths(){
 }
 
 function buildPrompt(){
-  const tipoSol=window._tipoSol||"inicial";
-  const expReciente=window._expReciente||"si";
-  const catCfg=CATS[cat];
-  const b12excl=cat==="B1.2"&&catCfg.b12exclude?catCfg.b12exclude:[];
   const cfg=CATS[cat];
   const fCfg=FORMACIONES[form];
   const reqM=getReqMonths();
+  const expReciente=window._expReciente||'si';
+  const b12excl=cat==='B1.2'&&cfg.b12exclude?cfg.b12exclude:[];
   const chapters=CHAPTER_DATA[cfg.chap];
-  const chapList=chapters.map(ch=>'ATA '+ch.cod+' | '+ch.nombre+' | Tipos OJT: '+ch.tipos.join(', ')).join('\n');
+  const chapList=chapters.map(ch=>'ATA '+ch.cod+' | '+ch.nombre+' | Tipos OJT requeridos: '+ch.tipos.join(', ')).join('\n');
   const today=new Date();
-  const todayStr=`${today.getDate()} de ${['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][today.getMonth()]} de ${today.getFullYear()}`;
+  const MNAMES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const todayStr=today.getDate()+' de '+MNAMES[today.getMonth()]+' de '+today.getFullYear();
+  const b12note=b12excl.length?'ATAs NO aplicables para B1.2 piston GA (no penalizar su ausencia): '+b12excl.join(', ')+'.':'';
 
-  return `Eres un inspector experto en licencias LMA Parte 66 de AESA (España). Fecha de análisis: ${todayStr}.
-Analiza el Registro de Experiencia Básica (LIC-P66-P01-F02) para categoría ${cat} — ${cfg.label}.
-Formación del candidato: ${fCfg.label}. Meses de experiencia requeridos: ${reqM} meses.
-
-TIPOS DE TAREA OJT: INS=Inspección | FOT=Prueba funcional | SGH=Servicio/Ground handling | R/I=Desmontaje y montaje | MEL=Equipo mínimo | TS=Troubleshooting
-RATIOS MÍNIMOS GLOBALES: INS≥70% | FOT≥50% | SGH≥50% | R/I≥50% | MEL≥25% | TS≥25%
-
-CAPÍTULOS ATA APLICABLES PARA ${cat}:
-${chapList}
-
-REGLAS AESA OBLIGATORIAS:
-1. MES VÁLIDO: un mes tiene ≥5 entradas con FECHAS DISTINTAS dentro de ese mes (p.ej. días 3,7,12,18,25). Cuenta exactamente. PROCESO: lista TODOS los meses del periodo inicio→fin sin saltarte ninguno. Para CADA mes cuenta días distintos con entradas. Marca válido si ≥5. NO omitas meses del final del documento. CUENTA DÍAS ÚNICOS con entradas (no número total de entradas).
-2. EXPERIENCIA REQUERIDA: ${reqM} meses válidos (vía ${fCfg.label}).
-3. EXPERIENCIA RECIENTE: ${expReciente==="si"?"EVALUAR: requiere ≥6 meses válidos en últimos 12 meses (jun 2025-may 2026) + ≥6 meses válidos entre jun 2018-may 2025.":"NO EVALUAR experiencia reciente (modo potencial). Marca recienteOk=true y meses12=null."}
-4. FIRMAS: El formato LIC-P66-P01-F02 tiene firma del Resp. Mto o CC: (a) una vez en la cabecera/inicio del formato y (b) al pie de cada PÁGINA de registro de tareas. NO se requiere firma en cada línea individual de tarea. Indica cuántas páginas de tareas tienen firma al pie y cuántas no la tienen.
-4b. ATAs NO APLICABLES PARA B1.2: ${cat==="B1.2"?"Los siguientes ATAs NO se deben exigir para aeronaves pistón de aviación general (sistemas inexistentes): "+b12excl.join(", ")+". No penalices su ausencia.":""}
-5. VIGENCIA: experiencia dentro de los 10 años anteriores a la fecha de análisis.
-6. ENTRADAS CON PROBLEMAS: identifica entradas sin firma del supervisor, sin número de autorización o CN (número de licencia del certificador), o ilegibles. Para descripción genérica: SOLO marca como genérica si la descripción NO contiene referencia a ninguno de: tarea específica del sistema, número de AMM/task card/OT/AD/SB/inspección. Descripciones como "MAIN WHEEL TIRE CHANGE", "50 HRS INSPECTION ATA 05", "BATTERY REPLACEMENT" son ESPECÍFICAS aunque no tengan número de task card. Solo marca genérica si dice algo como "TRABAJOS EN SISTEMAS" o "MANTENIMIENTO GENERAL" sin más detalle.
-7. CANDIDATO: extrae el nombre del candidato, el nombre de la organización de mantenimiento (MRO/OMA), el número de aprobación de la organización (ej. OMA 075, ES.145.XXXX), y los tipos de aeronave en los que se obtuvo la experiencia.
-8. TIPO SOLICITUD: ${tipoSol==="mod"?"MODIFICACIÓN de licencia — verifica que la experiencia es específica para la nueva categoría.":"EMISIÓN INICIAL de licencia."}
-
-RESPONDE SOLO con JSON válido sin markdown:
-{"candidato":"<nombre o null>","organizacion":"<nombre org o null>","numAprobacion":"<OMA/ES.145 o null>","aeronaves":["<tipo aeronave>"],"puntuacion":<0-100>,"estado":"conforme|atencion|critico","resumen":"<2-3 frases>","fechaAnalisis":"${todayStr}","configuracion":{"autoridad":"AESA","licencia":"${cat}","formacion":"${fCfg.label}","mesesRequeridos":${reqM},"rutaDetectada":"<ej: Nueva licencia ${cat} o B1.1→${cat}>","categoriaBase":"<si hay licencia previa, sino null>"},"verificacion":{"experienciaTotal":{"valor":<meses validos>,"requerido":${reqM},"ok":<bool>,"texto":"<desc breve>"},"experienciaReciente":{"valor":<meses últimos 12m>,"requerido":6,"ok":<bool>,"texto":"<desc breve>"},"coberturaATA":{"valor":<atas cubiertos>,"requerido":<total atas>,"ok":<bool>,"texto":"<desc breve>"},"firmasAuth":{"valor":<entradas con firma y auth validos>,"requerido":<total entradas>,"ok":<bool>,"texto":"<desc breve>"}},"experiencia":{"mesesValidos":<n>,"totalEntradas":<n>,"periodo":"<inicio> - <fin>","meses12":<n>,"meses7a":<n>,"recienteOk":<bool>},"mesesDetalle":[{"mes":"Ene 2023","tareas":<n>,"ok":<bool>}],"atas":[{"cod":"21","nombre":"Air conditioning","entradas":<n>,"estado":"ok|advertencia|critico|falta"}],"tiposTarea":{"INS":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"FOT":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"SGH":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"R/I":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"MEL":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>},"TS":{"realizadas":<n>,"requeridas":<n>,"ratio":<0-1>,"ok":<bool>}},"firmas":{"totalPaginas":<n>,"conFirma":<n>,"sinFirma":[<nums>]},"entradasProblemas":[{"num":<n>,"fecha":"dd/mm/yyyy","ata":"ATA XX","descripcion":"<desc breve>","supervisor":"<nombre o null>","numAuth":"<auth o null>","problema":"sin_firma|sin_auth|descripcion_generica|ilegible","estado":"critico|advertencia","comoCorregir":"<instrucción específica>"}],"alertas":[{"ref":"<ref>","desc":"<desc>","sev":"critico|advertencia|info","reg":"<ref AESA>"}],"acciones":[{"n":1,"tipo":"critico|importante|recomendado","titulo":"<titulo>","desc":"<desc>","comoCorregir":"<pasos específicos para solucionar>","entradasAfectadas":["<lista opcional de refs de entradas>"],"ref":"<ref AESA>"}]}`;
-}
-
-async function readFile(f){
-  const ext=f.name.split('.').pop().toLowerCase();
-  if(ext==='pdf')return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res({t:'pdf',d:r.result.split(',')[1]});r.onerror=rej;r.readAsDataURL(f);});
-  if(['xlsx','xls','csv'].includes(ext))return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'binary'});let tx=`LIC-P66-P01-F02 — ${f.name}
-
-`;wb.SheetNames.forEach(n=>{tx+=`=== ${n} ===
-${XLSX.utils.sheet_to_csv(wb.Sheets[n])}
-
-`;});res({t:'text',d:tx});}catch(err){rej(err);}};r.onerror=rej;r.readAsBinaryString(f);});
-  if(['docx','doc'].includes(ext)){
-    if(!window.mammoth)await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
-    return new Promise((res,rej)=>{const r=new FileReader();r.onload=async e=>{try{const out=await window.mammoth.extractRawText({arrayBuffer:e.target.result});res({t:'text',d:out.value});}catch(e2){rej(e2);}};r.onerror=rej;r.readAsArrayBuffer(f);});
-  }
-  return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res({t:'text',d:e.target.result});r.onerror=rej;r.readAsText(f);});
+  const lines=[
+    'Eres inspector experto LMA Parte 66 AESA. Fecha del analisis: '+todayStr+'.',
+    'Analiza el Registro de Experiencia Basica LIC-P66-P01-F02 para categoria '+cat+' — '+cfg.label+'.',
+    'Formacion del candidato: '+fCfg.label+'. Meses de experiencia requeridos: '+reqM+' meses.',
+    '',
+    'TIPOS DE TAREA OJT: INS=Inspeccion | FOT=Prueba funcional | SGH=Servicio/Ground handling | R/I=Desmontaje y montaje | MEL=Equipo minimo | TS=Troubleshooting',
+    'RATIOS MINIMOS GLOBALES (sobre el total de entradas): INS>=70% | FOT>=50% | SGH>=50% | R/I>=50% | MEL>=25% | TS>=25%',
+    'IMPORTANTE: los ratios se calculan como (entradas de ese tipo / total entradas del registro). Una entrada puede tener multiples tipos.',
+    '',
+    'CAPITULOS ATA APLICABLES PARA '+cat+':',
+    chapList,
+    b12note,
+    '',
+    'REGLAS AESA — SIGUE ESTAS INSTRUCCIONES AL PIE DE LA LETRA:',
+    '',
+    'REGLA 1 - MESES VALIDOS: Un mes es VALIDO si tiene entradas en al menos 5 DIAS DISTINTOS de ese mes.',
+    'PROCESO OBLIGATORIO: Lee el documento de principio a FIN. Para CADA mes calendario desde el inicio hasta',
+    'el ultimo mes del registro (incluyendo meses sin entradas), anota que dias del mes tienen al menos una entrada.',
+    'Un mes valido = al menos 5 dias distintos con entradas. NO cuentes entradas totales, cuenta DIAS UNICOS.',
+    'Ejemplo: si enero tiene entradas los dias 3,3,8,15,22,28 = dias unicos = 3,8,15,22,28 = 5 dias = VALIDO.',
+    'NO te detengas antes del ultimo mes del documento. Revisa hasta diciembre si el documento llega hasta ahi.',
+    'IMPORTANTE: el documento puede tener entradas hasta mayo de 2026. Analiza TODOS los meses hasta la ultima entrada.',
+    'Si el documento tiene entradas en Oct, Nov, Dic 2025, esos meses DEBEN aparecer en mesesDetalle.',
+    '',
+    'REGLA 2 - EXPERIENCIA REQUERIDA: '+reqM+' meses validos via '+fCfg.label+'.',
+    '',
+    'REGLA 3 - EXPERIENCIA RECIENTE: '+(expReciente==='si'?'EVALUAR: requiere >=6 meses validos en ultimos 12 meses (jun 2025-may 2026) Y >=6 meses validos entre jun 2018-may 2025.':'NO EVALUAR (modo potencial). Pon recienteOk=true.'),
+    '',
+    'REGLA 4 - FIRMAS: El formato LIC-P66-P01-F02 tiene firma del Responsable Mto o CC: (a) una vez en la portada/cabecera del formato, y (b) al PIE de cada PAGINA de registro de tareas. NO se requiere firma en cada linea individual.',
+    '',
+    'REGLA 5 - TAREAS GENERICAS: Solo marca generica si la descripcion NO tiene ningun detalle del sistema.',
+    'BATTERY REPLACEMENT, 50 HRS INSPECTION ATA 05, MAIN WHEEL TIRE CHANGE son ESPECIFICAS.',
+    'Solo es generica si dice algo como MANTENIMIENTO GENERAL sin mas detalle.',
+    '',
+    'REGLA 6 - RATIOS OJT: TODOS los registros del documento deben ser contabilizados sin excepcion.',
+    'El denominador SIEMPRE es el 100% de entradas del registro (ninguna se omite).',
+    'Para cada entrada, clasifica su tipo de tarea segun descripcion y ATA. Una entrada puede tener varios tipos.',
+    'ratio de cada tipo = entradas_de_ese_tipo / TOTAL_entradas_del_registro.',
+    'requeridas en JSON = TOTAL_entradas * ratio_minimo (ej: 300 entradas → INS requeridas=210, FOT=150, SGH=150, R/I=150, MEL=75, TS=75).',
+    'Si realizadas < requeridas → ok=false. Si realizadas >= requeridas → ok=true.',
+    'IMPORTANTE: la suma de realizadas de todos los tipos puede superar el total porque cada entrada puede tener multiples tipos.',
+    '',
+    'RESPONDE SOLO con este JSON valido sin markdown, rellenando todos los campos:',
+    '{"candidato":"<nombre completo>","organizacion":"<org>","numAprobacion":"<OMA/ES.145>","aeronaves":["<tipo>"],"puntuacion":<0-100>,"estado":"conforme|atencion|critico","resumen":"<2-3 frases precisas>","fechaAnalisis":"'+todayStr+'","configuracion":{"autoridad":"AESA","licencia":"'+cat+'","formacion":"'+fCfg.label+'","mesesRequeridos":'+reqM+',"rutaDetectada":"<ruta>","categoriaBase":null},"verificacion":{"experienciaTotal":{"valor":<meses_validos>,"requerido":'+reqM+',"ok":<bool>,"texto":"<desc>"},"experienciaReciente":{"valor":<meses_ultimos_12m>,"requerido":6,"ok":<bool>,"texto":"<desc>"},"coberturaATA":{"valor":<atas_cubiertos>,"requerido":<total_atas_aplicables>,"ok":<bool>,"texto":"<desc>"},"firmasAuth":{"valor":<entradas_con_firma_y_auth>,"requerido":<total_entradas>,"ok":<bool>,"texto":"<desc>"}},"experiencia":{"mesesValidos":<n>,"totalEntradas":<n_real_del_documento>,"periodo":"<dd/mm/yyyy> - <dd/mm/yyyy>","meses12":<n>,"meses7a":<n>,"recienteOk":<bool>},"mesesDetalle":[{"mes":"Ene 2023","tareas":<dias_unicos_con_entradas>,"ok":<bool>}],"atas":[{"cod":"05","nombre":"Time limits","entradas":<n>,"estado":"ok|advertencia|critico|falta"}],"tiposTarea":{"INS":{"realizadas":<n_entradas_INS>,"requeridas":<total_entradas*0.70>,"ratio":<realizadas/total_entradas>,"ok":<bool>},"FOT":{"realizadas":<n>,"requeridas":<total*0.50>,"ratio":<r>,"ok":<bool>},"SGH":{"realizadas":<n>,"requeridas":<total*0.50>,"ratio":<r>,"ok":<bool>},"R/I":{"realizadas":<n>,"requeridas":<total*0.50>,"ratio":<r>,"ok":<bool>},"MEL":{"realizadas":<n>,"requeridas":<total*0.25>,"ratio":<r>,"ok":<bool>},"TS":{"realizadas":<n>,"requeridas":<total*0.25>,"ratio":<r>,"ok":<bool>}},"firmas":{"totalPaginas":<n>,"conFirma":<n>,"sinFirma":[<nums_pagina>]},"entradasProblemas":[{"num":<n>,"fecha":"dd/mm/yyyy","ata":"ATA XX","descripcion":"<desc>","supervisor":"<nombre>","numAuth":"<auth_o_null>","problema":"sin_firma|sin_auth|descripcion_generica|ilegible","estado":"critico|advertencia","comoCorregir":"<instruccion>"}],"alertas":[{"ref":"<REF-001>","desc":"<desc>","sev":"critico|advertencia|info","reg":"<ref AESA>"}],"acciones":[{"n":1,"tipo":"critico|importante|recomendado","titulo":"<titulo>","desc":"<desc>","comoCorregir":"<pasos especificos>","entradasAfectadas":["<refs>"],"ref":"<ref AESA>"}]}'
+  ];
+  return lines.join('\n');
 }
 
 function buildExtractionPrompt(){
@@ -400,24 +407,29 @@ async function analyze(){
   root().innerHTML=spinHTML(0);
   const tick=n=>new Promise(r=>setTimeout(()=>{root().innerHTML=spinHTML(n);r();},550));
   try{
-    await tick(1);const con=await readFile(file);
-    await tick(2);await tick(3);
+    await tick(1);
+    const con=await readFile(file);
+    window._lastCon=con;
+    window._lastExtracted=null;
+    await tick(2);
     const prompt=buildPrompt();
     let msgs;
-    if(con.t==='pdf')msgs=[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:con.d}},{type:'text',text:prompt}]}];
-    else msgs=[{role:'user',content:`${prompt}
-
-DOCUMENTO:
-${con.d.substring(0,28000)}`}];
+    if(con.t==='pdf'){
+      msgs=[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:con.d}},{type:'text',text:prompt}]}];
+    } else {
+      // For text files, send as much as possible
+      msgs=[{role:'user',content:prompt+'\n\nDOCUMENTO COMPLETO:\n'+con.d.substring(0,55000)}];
+    }
+    await tick(3);
     await tick(4);
-    const resp=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:8000,system:'Eres inspector experto LMA Parte 66 AESA. Responde en español con JSON válido únicamente.',messages:msgs})});
+    const resp=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:8000,system:'Eres inspector experto LMA Parte 66 AESA. Responde en espanol con JSON valido unicamente.',messages:msgs})});
     const data=await resp.json();
     if(data.error)throw new Error(data.error.message);
     await tick(5);
     const rpt=data.content?JSON.parse(data.content.map(i=>i.text||'').join('')):data;
     window._lastRpt=rpt;
-window._lastCon=con;
-setTimeout(()=>showReport(rpt,false),400);
+    window._lastExtracted={mesesDetalle:rpt.mesesDetalle,totalEntradas:rpt.experiencia?.totalEntradas};
+    setTimeout(()=>showReport(rpt,false),400);
   }catch(e){file=null;render('Error al analizar: '+e.message);}
 }
 
