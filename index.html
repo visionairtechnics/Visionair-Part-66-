@@ -140,7 +140,7 @@ async function analyze(){
     if(con.t==='pdf'){msgs=[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:con.d}},{type:'text',text:prompt}]}];}
     else{msgs=[{role:'user',content:`${prompt}\n\nDOCUMENTO:\n${con.d.substring(0,20000)}`}];}
     await tick(4);
-    const resp=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:2000,system:'Eres inspector experto LMA Parte 66 AESA. Responde en español con JSON válido únicamente.',messages:msgs})});
+    const resp=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:8000,system:'Eres inspector experto LMA Parte 66 AESA. Responde en español con JSON válido únicamente.',messages:msgs})});
     const data=await resp.json();
     if(data.error)throw new Error(data.error.message);
     const rpt = data.content ? JSON.parse(data.content.map(i=>i.text||'').join('')) : data;
