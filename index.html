@@ -203,6 +203,7 @@ textarea.ctx-input::placeholder{color:var(--text3)}
 <div class="wrap"><div id="root"></div></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
 <script>
 // Theme
 const themeBtn=document.getElementById('themeBtn');
@@ -299,6 +300,105 @@ ${XLSX.utils.sheet_to_csv(wb.Sheets[n])}
   return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res({t:'text',d:e.target.result});r.onerror=rej;r.readAsText(f);});
 }
 
+function buildExtractionPrompt(){
+  // Phase 1: Extract raw structured data from the document
+  return `Extrae los datos del Registro de Experiencia Básica (LIC-P66-P01-F02) y devuelve SOLO un JSON con esta estructura exacta, sin markdown:
+{"candidato":"<nombre completo o null>","organizacion":"<nombre org>","numAprobacion":"<OMA/ES.145 o null>","aeronaves":["<tipo>"],"totalEntradas":<n>,"periodo":{"inicio":"<dd/mm/yyyy>","fin":"<dd/mm/yyyy>"},"totalPaginas":<n>,"paginasSinFirma":[<nums>],"mesesDetalle":[{"mes":"Ene 2023","anio":2023,"num":1,"diasConEntradas":[<lista de días del mes que tienen al menos una entrada, ej: 3,8,15,22,28>],"totalEntradas":<n>}],"entradas":[{"num":<n o null>,"fecha":"dd/mm/yyyy","ata":"<ATA XX o XX-XX>","descripcion":"<texto completo>","supervisor":"<nombre o null>","numAuth":"<auth o null>"}],"supervisor":"<nombre del supervisor principal>"}
+
+INSTRUCCIONES CRÍTICAS:
+1. Para mesesDetalle: lista TODOS los meses calendario desde el inicio hasta el fin del registro. Para cada mes, lista SOLO los días únicos que tienen alguna entrada (si el día 8 tiene 3 entradas, cuenta como 1 día). Ejemplo correcto: si enero tiene entradas los días 4,4,8,15,22,28 → diasConEntradas:[4,8,15,22,28] (5 días únicos).
+2. Para entradas: incluye TODAS las entradas del documento. Si hay más de 200, incluye las primeras 100 y las últimas 50, marcando cuántas se omiten.
+3. Para paginasSinFirma: el formato tiene firma al pie de cada página de tareas. Indica qué páginas NO tienen firma visible.`;
+}
+
+async function analyzeInTwoPhases(con){
+  // Phase 1: Extract structured data
+  let msgs1;
+  const extractPrompt = buildExtractionPrompt();
+  if(con.t==='pdf'){msgs1=[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:con.d}},{type:'text',text:extractPrompt}]}];}
+  else{msgs1=[{role:'user',content:extractPrompt+'\n\nDOCUMENTO:\n'+con.d.substring(0,35000)}];}
+  
+  const resp1=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:8000,system:'Eres un extractor de datos experto. Extrae datos exactos del documento sin interpretarlos. Solo JSON.',messages:msgs1})});
+  const data1=await resp1.json();
+  if(data1.error)throw new Error(data1.error.message);
+  const txt1=data1.content?data1.content.map(i=>i.text||'').join(''):JSON.stringify(data1);
+  const cleanTxt1=txt1.replace(/```json|```/g,'').trim();
+  const match1=cleanTxt1.match(/\{[\s\S]*\}/);
+  const extracted=JSON.parse(match1?match1[0]:cleanTxt1);
+  
+  return extracted;
+}
+
+function buildEvaluationPrompt(extracted, contextNote=''){
+  const cfg=CATS[cat];
+  const fCfg=FORMACIONES[form];
+  const reqM=getReqMonths();
+  const expReciente=window._expReciente||'si';
+  const tipoSol=window._tipoSol||'inicial';
+  const b12excl=cat==='B1.2'&&cfg.b12exclude?cfg.b12exclude:[];
+  const chapters=CHAPTER_DATA[cfg.chap];
+  const chapList=chapters.map(ch=>'ATA '+ch.cod+' | '+ch.nombre+' | Tipos OJT: '+ch.tipos.join(', ')).join('\n');
+  const today=new Date();
+  const todayStr=today.getDate()+' de '+['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][today.getMonth()]+' de '+today.getFullYear();
+  
+  // Calculate valid months from extracted data (deterministic)
+  const validMonths=extracted.mesesDetalle?extracted.mesesDetalle.filter(m=>m.diasConEntradas&&m.diasConEntradas.length>=5):[]; 
+  const validMonthsList=validMonths.map(m=>m.mes).join(', ');
+  const mv=validMonths.length;
+  
+  // Recent experience calculation (deterministic from extracted data)
+  const now=new Date(2026,4,20); // May 2026
+  const last12start=new Date(2025,4,20); // May 2025
+  const last7end=new Date(2025,4,19);  // Before last 12m
+  const last7start=new Date(2018,5,20); // June 2018
+  
+  let months12=0, months7a=0;
+  if(extracted.mesesDetalle){
+    extracted.mesesDetalle.forEach(m=>{
+      if(!m.diasConEntradas||m.diasConEntradas.length<5)return;
+      const [mes,anio]=m.mes.split(' ');
+      const mesMap={'Ene':0,'Feb':1,'Mar':2,'Abr':3,'May':4,'Jun':5,'Jul':6,'Ago':7,'Sep':8,'Oct':9,'Nov':10,'Dic':11};
+      const d=new Date(parseInt(anio),mesMap[mes]||0,1);
+      if(d>=last12start&&d<now)months12++;
+      else if(d>=last7start&&d<last12start)months7a++;
+    });
+  }
+  
+  return \`Eres inspector experto Parte 66 AESA. Fecha: \${todayStr}. Evalúa la experiencia para categoría \${cat} — \${cfg.label}. Formación: \${fCfg.label}. Meses requeridos: \${reqM}.
+
+DATOS YA EXTRAÍDOS DEL DOCUMENTO (usa estos datos, no los recuentes):
+- Candidato: \${extracted.candidato||'No identificado'}
+- Organización: \${extracted.organizacion||'No identificada'} \${extracted.numAprobacion||''}
+- Aeronaves: \${(extracted.aeronaves||[]).join(', ')}
+- Total entradas: \${extracted.totalEntradas}
+- Periodo: \${extracted.periodo?.inicio||'?'} - \${extracted.periodo?.fin||'?'}
+- Total páginas: \${extracted.totalPaginas}
+- Páginas sin firma: \${(extracted.paginasSinFirma||[]).join(', ')||'ninguna'}
+- MESES VÁLIDOS (≥5 días únicos con entradas): \${mv} meses → \${validMonthsList}
+- Meses en últimos 12 meses: \${months12}
+- Meses en años 2-7: \${months7a}
+- Supervisor principal: \${extracted.supervisor||'No identificado'}
+
+TIPOS DE TAREA OJT: INS=Inspección | FOT=Prueba funcional | SGH=Servicio | R/I=Desmontaje/montaje | MEL=Equipo mínimo | TS=Troubleshooting
+RATIOS MÍNIMOS: INS≥70% | FOT≥50% | SGH≥50% | R/I≥50% | MEL≥25% | TS≥25%
+
+CAPÍTULOS ATA APLICABLES PARA \${cat}:
+\${chapList}
+\${cat==='B1.2'&&b12excl.length?'ATAs NO aplicables para B1.2 (no penalizar su ausencia): '+b12excl.join(', '):''}
+
+INSTRUCCIONES:
+1. USA los meses válidos ya calculados (\${mv} meses). NO los recuentes. Solo indica cuáles son.
+2. EXPERIENCIA RECIENTE: \${expReciente==='si'?'EVALUAR: requiere ≥6 meses en últimos 12m + ≥6 en años 2-7. Últimos 12m: '+months12+' meses. Años 2-7: '+months7a+' meses.':'NO EVALUAR (modo potencial). Marca recienteOk=true.'}
+3. CLASIFICA cada entrada por ATA y tipo de tarea para calcular cobertura y ratios OJT.
+4. FIRMAS: el formato tiene firma al pie de cada página de tareas. Páginas sin firma: \${(extracted.paginasSinFirma||[]).join(', ')||'ninguna'}.
+5. TAREAS GENÉRICAS: SOLO marca como genérica si no tiene ningún detalle del sistema. Descripciones como "BATTERY REPLACEMENT", "50 HRS INSPECTION ATA 05", "MAIN WHEEL TIRE CHANGE" son ESPECÍFICAS.
+\${b12excl.length?'6. Para B1.2: NO exijas los ATAs '+b12excl.join(', ')+' (sistemas inexistentes en GA pistón).':''}
+\${contextNote?'7. CONTEXTO DEL EVALUADOR (tiene prioridad): '+contextNote:''}
+
+RESPONDE SOLO con JSON válido sin markdown:
+{"candidato":"<nombre>","organizacion":"<org>","numAprobacion":"<num>","aeronaves":["<tipo>"],"puntuacion":<0-100>,"estado":"conforme|atencion|critico","resumen":"<2-3 frases>","fechaAnalisis":"\${todayStr}","configuracion":{"autoridad":"AESA","licencia":"\${cat}","formacion":"\${fCfg.label}","mesesRequeridos":\${reqM},"rutaDetectada":"<ruta>","categoriaBase":null},"verificacion":{"experienciaTotal":{"valor":\${mv},"requerido":\${reqM},"ok":\${mv>=reqM},"texto":"<desc>"},"experienciaReciente":{"valor":\${months12},"requerido":6,"ok":\${expReciente==='no'?true:months12>=6},"texto":"<desc>"},"coberturaATA":{"valor":<n cubiertos>,"requerido":<n total aplicables>,"ok":<bool>,"texto":"<desc>"},"firmasAuth":{"valor":<entradas con firma+auth>,"requerido":\${extracted.totalEntradas},"ok":<bool>,"texto":"<desc>"}},"experiencia":{"mesesValidos":\${mv},"totalEntradas":\${extracted.totalEntradas},"periodo":"\${extracted.periodo?.inicio||'?'} - \${extracted.periodo?.fin||'?'}","meses12":\${months12},"meses7a":\${months7a},"recienteOk":\${expReciente==='no'?true:months12>=6&&months7a>=6}},"mesesDetalle":[<USA EXACTAMENTE los meses del array extracted.mesesDetalle con ok:true si diasConEntradas.length>=5>],"atas":[{"cod":"21","nombre":"Air conditioning","entradas":<n>,"estado":"ok|advertencia|critico|falta"}],"tiposTarea":{"INS":{"realizadas":<n>,"requeridas":<total_entries_where_this_type_is_required>,"ratio":<0-1>,"ok":<bool>},"FOT":{...},"SGH":{...},"R/I":{...},"MEL":{...},"TS":{...}},"firmas":{"totalPaginas":\${extracted.totalPaginas||0},"conFirma":<n>,"sinFirma":\${JSON.stringify(extracted.paginasSinFirma||[])}},"entradasProblemas":[{"num":<n>,"fecha":"dd/mm/yyyy","ata":"ATA XX","descripcion":"<desc>","supervisor":"<nombre>","numAuth":"<auth>","problema":"sin_firma|sin_auth|descripcion_generica|ilegible","estado":"critico|advertencia","comoCorregir":"<instruccion>"}],"alertas":[{"ref":"<ref>","desc":"<desc>","sev":"critico|advertencia|info","reg":"<ref>"}],"acciones":[{"n":1,"tipo":"critico|importante|recomendado","titulo":"<titulo>","desc":"<desc>","comoCorregir":"<pasos>","entradasAfectadas":[],"ref":"<ref>"}]}\`;
+}
+
 async function analyze(){
   root().innerHTML=spinHTML(0);
   const tick=n=>new Promise(r=>setTimeout(()=>{root().innerHTML=spinHTML(n);r();},550));
@@ -376,6 +476,7 @@ ${isReevaluation?`<div class="final-badge"><i class="ti ti-rosette-discount-chec
   </div>
   <div class="btn-group no-print">
     <button class="btn-out" onclick="window.print()"><i class="ti ti-printer"></i>Imprimir / PDF</button>
+    <button class="btn-out" id="wordBtn" onclick="window.descargarWord()"><i class="ti ti-file-type-doc"></i>Descargar Word</button>
     <button class="btn-out" onclick="file=null;cat=null;form=null;render(null)"><i class="ti ti-refresh"></i>Nuevo análisis</button>
   </div>
 </div>
@@ -490,11 +591,17 @@ ${plan.length?`<div class="sec">
 </div>
 <div id="reviewPanel"></div>
 `;
-  // Add review panel after report renders
+  // Add review panel toggle after report renders
   setTimeout(()=>{
     const rp=document.getElementById('reviewPanel');
     if(!rp||isReevaluation)return;
-    rp.innerHTML=`<div class="review-panel no-print">
+    rp.innerHTML=`<div class="no-print" style="margin-top:1.5rem;text-align:center">
+  <button class="btn-out" id="openCtxBtn" onclick="window.toggleCtxPanel()" style="gap:8px;padding:10px 18px;font-size:13px">
+    <i class="ti ti-message-plus"></i>Añadir contexto y reevaluar
+    <i class="ti ti-chevron-down" id="ctxChevron"></i>
+  </button>
+</div>
+<div class="review-panel no-print" id="ctxPanelInner" style="display:none;margin-top:8px">
   <h3><i class="ti ti-message-plus" style="color:var(--accent)"></i>Añadir contexto y reevaluar</h3>
   <p class="sub">¿Hay información que el análisis no ha considerado? Meses vacíos por causa justificada, contexto sobre la organización, aclaraciones sobre alertas... Añádela para obtener un informe final más preciso.</p>
   <p style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:7px;text-transform:uppercase;letter-spacing:.04em">Añadir contexto rápido</p>
@@ -512,7 +619,7 @@ ${plan.length?`<div class="sec">
   <textarea id="ctxInput" class="ctx-input" placeholder="Ej: Los meses de enero-marzo 2020 están vacíos por cierre de la organización durante la pandemia. El supervisor Andres Perez sí tiene número de autorización pero no lo registraba sistemáticamente en el formato. El ATA 72R no aparece porque la organización opera principalmente turbohélice, aunque el candidato también trabaja en un Cessna 172 en otra organización no incluida aquí..."></textarea>
   <br>
   <button class="reeval-btn" id="reEvalBtn" onclick="window.reEvaluar()"><i class="ti ti-refresh-alert"></i>Reevaluar con este contexto</button>
-  <p style="font-size:11px;color:var(--text3);margin-top:8px">Se realizará un nuevo análisis del documento teniendo en cuenta tu contexto para generar el informe final corregido.</p>
+  <p style="font-size:11px;color:var(--text3);margin-top:8px">Se realizará un nuevo análisis del documento teniendo en cuenta el contexto indicado, manteniendo los mismos criterios de evaluación seleccionados inicialmente.</p>
 </div>`;
   },200);
 }
@@ -603,6 +710,294 @@ window.addCtx=txt=>{
   ta.focus();
 };
 
+window.descargarWord=async()=>{
+  const btn=document.getElementById('wordBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i>Generando...';}
+  try{
+    const rpt=window._lastRpt;
+    if(!rpt)throw new Error('No hay informe generado');
+    if(!window.docx)throw new Error('Librería docx no cargada. Recarga la página.');
+    
+    const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,
+           AlignmentType,HeadingLevel,BorderStyle,WidthType,ShadingType,
+           VerticalAlign,PageNumber,Header,Footer} = window.docx;
+    
+    const exp=rpt.experiencia||{};
+    const ver=rpt.verificacion||{};
+    const atas=rpt.atas||[];
+    const tt=rpt.tiposTarea||{};
+    const mes=rpt.mesesDetalle||[];
+    const alertas=rpt.alertas||[];
+    const plan=rpt.acciones||[];
+    const eps=rpt.entradasProblemas||[];
+    const TIPOS=['INS','FOT','SGH','R/I','MEL','TS'];
+    const TIPO_LABELS={'INS':'Inspección','FOT':'Prueba Func.','SGH':'Servicio','R/I':'Desm./Mont.','MEL':'MEL','TS':'Troublesh.'};
+    
+    const border={style:BorderStyle.SINGLE,size:1,color:'CCCCCC'};
+    const borders={top:border,bottom:border,left:border,right:border};
+    const noBorder={style:BorderStyle.NONE,size:0,color:'FFFFFF'};
+    const noBorders={top:noBorder,bottom:noBorder,left:noBorder,right:noBorder};
+    const cellMar={top:80,bottom:80,left:120,right:120};
+    
+    const h=(txt,lvl=1)=>new Paragraph({
+      heading:lvl===1?HeadingLevel.HEADING_1:HeadingLevel.HEADING_2,
+      children:[new TextRun({text:txt,bold:true,size:lvl===1?28:24,color:lvl===1?'1B2D5B':'333333',font:'Arial'})]
+    });
+    
+    const p=(txt,opts={})=>new Paragraph({
+      spacing:{after:opts.after||120},
+      children:[new TextRun({text:txt,size:opts.size||22,bold:opts.bold||false,color:opts.color||'333333',font:'Arial',italics:opts.italic||false})]
+    });
+    
+    const kv=(key,val,valColor='333333')=>new Paragraph({
+      spacing:{after:80},
+      children:[
+        new TextRun({text:key+': ',bold:true,size:20,color:'666666',font:'Arial'}),
+        new TextRun({text:val||'—',size:20,color:valColor,font:'Arial',bold:!!valColor&&valColor!=='333333'})
+      ]
+    });
+    
+    const divider=()=>new Paragraph({
+      border:{bottom:{style:BorderStyle.SINGLE,size:4,color:'1B2D5B',space:1}},
+      spacing:{after:160},children:[new TextRun('')]
+    });
+    
+    const stateColor=rpt.estado==='conforme'?'1A7A30':rpt.estado==='critico'?'C5221F':'856404';
+    const stateLabel=rpt.estado==='conforme'?'CONFORME — LISTO PARA PRESENTAR':rpt.estado==='critico'?'ACCIÓN URGENTE — NO PRESENTAR SIN CORREGIR':'REQUIERE ATENCIÓN — REVISA ANTES DE PRESENTAR';
+    const reqM=getReqMonths();
+    const mv=exp.mesesValidos||0;
+    
+    // ATA table rows
+    const ataRows=[
+      new TableRow({
+        tableHeader:true,
+        children:['ATA','Nombre','Entradas','Estado'].map((h,i)=>new TableCell({
+          borders,shading:{fill:'1B2D5B',type:ShadingType.CLEAR},
+          width:{size:[800,5000,1200,1600][i],type:WidthType.DXA},
+          margins:cellMar,
+          children:[new Paragraph({children:[new TextRun({text:h,bold:true,size:18,color:'FFFFFF',font:'Arial'})]})]
+        }))
+      }),
+      ...atas.map((a,i)=>new TableRow({
+        children:[
+          new TableCell({borders,width:{size:800,type:WidthType.DXA},margins:cellMar,shading:{fill:i%2===0?'F5F5F5':'FFFFFF',type:ShadingType.CLEAR},children:[new Paragraph({children:[new TextRun({text:'ATA '+a.cod,size:18,font:'Courier New'})]})] }),
+          new TableCell({borders,width:{size:5000,type:WidthType.DXA},margins:cellMar,shading:{fill:i%2===0?'F5F5F5':'FFFFFF',type:ShadingType.CLEAR},children:[new Paragraph({children:[new TextRun({text:a.nombre||'',size:18,font:'Arial'})]})] }),
+          new TableCell({borders,width:{size:1200,type:WidthType.DXA},margins:cellMar,shading:{fill:i%2===0?'F5F5F5':'FFFFFF',type:ShadingType.CLEAR},children:[new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:(a.entradas||0)+'t',size:18,font:'Arial'})]})] }),
+          new TableCell({borders,width:{size:1600,type:WidthType.DXA},margins:cellMar,shading:{fill:{ok:'D4EDDA',advertencia:'FFF3CD',critico:'FCE8E6',falta:'F5F5F5'}[a.estado]||'F5F5F5',type:ShadingType.CLEAR},children:[new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:{ok:'✓ Cubierto',advertencia:'⚠ Parcial',critico:'✗ Crítico',falta:'— Sin datos'}[a.estado]||a.estado,size:18,font:'Arial',color:{ok:'1A7A30',advertencia:'856404',critico:'C5221F',falta:'888888'}[a.estado]||'333333'})]})] })
+        ]
+      }))
+    ];
+    
+    // Entry problems table
+    const epsRows=eps.length?[
+      new TableRow({tableHeader:true,children:['Nº','Fecha','ATA','Descripción','Supervisor','Auth.','Problema'].map((h,i)=>new TableCell({
+        borders,shading:{fill:'1B2D5B',type:ShadingType.CLEAR},
+        width:{size:[500,1000,800,3000,2000,800,1200][i],type:WidthType.DXA},
+        margins:cellMar,
+        children:[new Paragraph({children:[new TextRun({text:h,bold:true,size:16,color:'FFFFFF',font:'Arial'})]})]
+      }))}),
+      ...eps.map(e=>new TableRow({children:[
+        new TableCell({borders,width:{size:500,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:String(e.num||'—'),size:16,font:'Arial'})]})] }),
+        new TableCell({borders,width:{size:1000,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:e.fecha||'—',size:16,font:'Arial'})]})] }),
+        new TableCell({borders,width:{size:800,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:e.ata||'—',size:16,bold:true,font:'Courier New'})]})] }),
+        new TableCell({borders,width:{size:3000,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:(e.descripcion||'—').substring(0,60),size:16,font:'Arial'})]})] }),
+        new TableCell({borders,width:{size:2000,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:e.supervisor||'—',size:16,font:'Arial'})]})] }),
+        new TableCell({borders,width:{size:800,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:e.numAuth||'—',size:16,font:'Arial'})]})] }),
+        new TableCell({borders,width:{size:1200,type:WidthType.DXA},margins:cellMar,children:[new Paragraph({children:[new TextRun({text:{'sin_firma':'Sin firma','sin_auth':'Sin nº auth.','descripcion_generica':'Desc. genérica','ilegible':'Ilegible'}[e.problema]||e.problema||'',size:16,font:'Arial',color:e.estado==='critico'?'C5221F':'856404'})]})] })
+      ]})
+    ]:[];
+    
+    const children=[
+      // Header
+      new Paragraph({spacing:{after:40},children:[new TextRun({text:'VISIONAIR TRAINING CENTER',size:18,color:'8898AA',font:'Arial',bold:true,allCaps:true})]}),
+      new Paragraph({spacing:{after:40},children:[new TextRun({text:'Verificador de Experiencia Part-66 · AESA',size:28,bold:true,color:'1B2D5B',font:'Arial'})]}),
+      new Paragraph({spacing:{after:200},children:[new TextRun({text:'Análisis generado el '+rpt.fechaAnalisis+' · '+file?.name,size:18,color:'888888',font:'Arial'})]}),
+      
+      // Candidate
+      ...(rpt.candidato?[
+        new Paragraph({spacing:{after:40},children:[new TextRun({text:'CANDIDATO',size:16,bold:true,color:'888888',font:'Arial',allCaps:true})]}),
+        new Paragraph({spacing:{after:60},children:[new TextRun({text:rpt.candidato,size:36,bold:true,color:'1B2D5B',font:'Arial'})]}),
+        ...(rpt.organizacion?[new Paragraph({spacing:{after:20},children:[new TextRun({text:'Organización: '+rpt.organizacion+(rpt.numAprobacion?' · '+rpt.numAprobacion:''),size:20,font:'Arial',color:'444444'})]})]:[]),
+        ...(rpt.aeronaves?.length?[new Paragraph({spacing:{after:160},children:[new TextRun({text:'Aeronaves: '+rpt.aeronaves.join(', '),size:20,font:'Arial',color:'444444'})]})]:[])
+      ]:[]),
+      
+      divider(),
+      
+      // Status banner
+      new Paragraph({
+        shading:{fill:rpt.estado==='conforme'?'D4EDDA':rpt.estado==='critico'?'FCE8E6':'FFF3CD',type:ShadingType.CLEAR},
+        border:{top:{style:BorderStyle.SINGLE,size:4,color:stateColor},bottom:{style:BorderStyle.SINGLE,size:4,color:stateColor},left:{style:BorderStyle.SINGLE,size:4,color:stateColor},right:{style:BorderStyle.SINGLE,size:4,color:stateColor}},
+        spacing:{before:80,after:80},
+        children:[new TextRun({text:stateLabel+' — '+rpt.puntuacion+'%',bold:true,size:24,color:stateColor,font:'Arial'})]
+      }),
+      new Paragraph({spacing:{after:80},children:[new TextRun({text:rpt.resumen||'',size:20,font:'Arial',italics:true,color:'444444'})]}),
+      
+      divider(),
+      
+      // Config
+      h('Configuración del Análisis',2),
+      kv('Categoría',cat),kv('Formación',FORMACIONES[form]?.label),
+      kv('Meses requeridos',reqM+' meses'),
+      ...(rpt.configuracion?.rutaDetectada?[kv('Ruta detectada',rpt.configuracion.rutaDetectada)]:[]),
+      kv('Periodo',exp.periodo),
+      
+      divider(),
+      
+      // Verification
+      h('Verificación Part-66',2),
+      ...Object.entries(ver).map(([k,v])=>{
+        if(!v)return null;
+        const labels={experienciaTotal:'Experiencia Total',experienciaReciente:'Experiencia Reciente',coberturaATA:'Cobertura ATA',firmasAuth:'Firmas y Autorizaciones'};
+        const refs={experienciaTotal:'Part-66.A.30(e)',experienciaReciente:'AMC 66.A.30(d)',coberturaATA:'AMC 66.A.20(b)',firmasAuth:'Part-66.A.20(a)'};
+        const ic=v.ok?'✓':v.ok===false?'✗':'⚠';
+        const col=v.ok?'1A7A30':v.ok===false?'C5221F':'856404';
+        return new Paragraph({
+          spacing:{after:100},
+          children:[
+            new TextRun({text:ic+' ',bold:true,size:22,color:col,font:'Arial'}),
+            new TextRun({text:(labels[k]||k)+': ',bold:true,size:22,font:'Arial',color:'1B2D5B'}),
+            new TextRun({text:(v.valor||'?')+'/'+(v.requerido||'?'),bold:true,size:22,color:col,font:'Arial'}),
+            new TextRun({text:' — '+v.texto,size:20,font:'Arial',color:'444444'}),
+            new TextRun({text:'  ('+refs[k]+')',size:18,font:'Arial',color:'888888',italics:true})
+          ]
+        });
+      }).filter(Boolean),
+      
+      divider(),
+      
+      // Months
+      h('Meses del Registro',2),
+      new Paragraph({spacing:{after:40},children:[new TextRun({text:'Verde = ≥5 tareas en días distintos · '+mv+'/'+reqM+' meses válidos',size:18,font:'Arial',color:'666666',italics:true})]}),
+      new Paragraph({
+        spacing:{after:160},
+        children:mes.map(m=>new TextRun({text:(m.ok?'[✓]':'[ ]')+' '+m.mes+'  ',size:18,color:m.ok?'1A7A30':'888888',font:'Courier New',bold:m.ok}))
+      }),
+      
+      divider(),
+      
+      // OJT
+      ...(Object.keys(tt).length?[
+        h('Tipos de Tarea OJT — Ratios Globales',2),
+        new Table({
+          width:{size:8600,type:WidthType.DXA},
+          columnWidths:[700,700,700,700,700,700,700,700,700,700,700,700].slice(0,TIPOS.length*2),
+          rows:[
+            new TableRow({children:TIPOS.map(t=>new TableCell({borders,width:{size:Math.floor(8600/TIPOS.length),type:WidthType.DXA},margins:cellMar,shading:{fill:'1B2D5B',type:ShadingType.CLEAR},children:[new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:t,bold:true,size:18,color:'FFFFFF',font:'Arial'})]})]})) }),
+            new TableRow({children:TIPOS.map(t=>{const d=tt[t]||{};const pct=d.ratio!=null?Math.round(d.ratio*100):0;const min=Math.round((TIPO_MIN[t]||0)*100);const ok=d.ok!==undefined?d.ok:pct>=min;const col=ok?'1A7A30':pct>=min*.7?'856404':'C5221F';const bg=ok?'D4EDDA':pct>=min*.7?'FFF3CD':'FCE8E6';return new TableCell({borders,width:{size:Math.floor(8600/TIPOS.length),type:WidthType.DXA},margins:cellMar,shading:{fill:bg,type:ShadingType.CLEAR},children:[new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:pct+'%',bold:true,size:22,color:col,font:'Arial'}),new TextRun({text:'\nmín.'+min+'%\n'+(d.realizadas||'?')+'/'+(d.requeridas||'?'),size:16,color:'666666',font:'Arial',break:1})]})]}); }) })
+          ]
+        }),
+        new Paragraph({spacing:{after:160},children:[new TextRun({text:TIPOS.map(t=>t+'='+TIPO_LABELS[t]).join(' · '),size:16,font:'Arial',color:'888888',italics:true})]})
+      ]:[]),
+      
+      divider(),
+      
+      // ATAs
+      ...(atas.length?[
+        h('Cobertura ATA · '+cat,2),
+        new Table({width:{size:8600,type:WidthType.DXA},columnWidths:[800,5000,1200,1600],rows:ataRows}),
+        new Paragraph({spacing:{after:160},children:[new TextRun('')]})
+      ]:[]),
+      
+      divider(),
+      
+      // Alerts
+      ...(alertas.length?[
+        h('Alertas',2),
+        ...alertas.map(a=>{
+          const sMap={critico:{col:'C5221F',lbl:'CRÍTICO'},advertencia:{col:'856404',lbl:'ADVERTENCIA'},info:{col:'1558D6',lbl:'INFO'}};
+          const sm=sMap[a.sev]||sMap.info;
+          return new Paragraph({
+            spacing:{after:120},
+            border:{left:{style:BorderStyle.SINGLE,size:8,color:sm.col,space:4}},
+            indent:{left:200},
+            children:[
+              new TextRun({text:'['+sm.lbl+'] ',bold:true,size:20,color:sm.col,font:'Arial'}),
+              new TextRun({text:(a.ref||'')+' — ',bold:true,size:20,font:'Arial',color:'1B2D5B'}),
+              new TextRun({text:a.desc||'',size:20,font:'Arial'}),
+              ...(a.reg?[new TextRun({text:'  '+a.reg,size:18,font:'Arial',color:'888888',italics:true})]:[])
+            ]
+          });
+        })
+      ]:[]),
+      
+      ...(alertas.length?[divider()]:[]),
+      
+      // Action Plan
+      ...(plan.length?[
+        h('Plan de Acción',2),
+        ...plan.flatMap(a=>{
+          const tMap={critico:{col:'C5221F',lbl:'URGENTE'},importante:{col:'856404',lbl:'IMPORTANTE'},recomendado:{col:'1558D6',lbl:'RECOMENDADO'}};
+          const tm=tMap[a.tipo]||tMap.recomendado;
+          return [
+            new Paragraph({
+              spacing:{after:60},
+              children:[
+                new TextRun({text:'0'+a.n+'. ',bold:true,size:22,color:tm.col,font:'Arial'}),
+                new TextRun({text:a.titulo,bold:true,size:22,font:'Arial',color:'1B2D5B'}),
+                new TextRun({text:'  ['+tm.lbl+']',size:18,font:'Arial',color:tm.col,bold:true})
+              ]
+            }),
+            new Paragraph({spacing:{after:60},indent:{left:360},children:[new TextRun({text:a.desc||'',size:20,font:'Arial',color:'444444'})]}),
+            ...(a.comoCorregir?[new Paragraph({spacing:{after:60},indent:{left:360},children:[new TextRun({text:'Cómo corregir: ',bold:true,size:20,font:'Arial',color:'1B2D5B'}),new TextRun({text:a.comoCorregir,size:20,font:'Arial',color:'444444'})]})]:[]),
+            ...(a.ref?[new Paragraph({spacing:{after:120},indent:{left:360},children:[new TextRun({text:a.ref,size:18,font:'Arial',color:'888888',italics:true})]})]:[])
+          ];
+        })
+      ]:[]),
+      
+      // Entry problems
+      ...(eps.length?[
+        divider(),
+        h('Entradas con Problemas',2),
+        new Table({width:{size:9300,type:WidthType.DXA},columnWidths:[500,1000,800,3000,2000,800,1200],rows:epsRows}),
+        new Paragraph({spacing:{after:160},children:[new TextRun({text:'Solo se muestran entradas con problemas identificados.',size:18,font:'Arial',color:'888888',italics:true})]})
+      ]:[]),
+      
+      // Footer note
+      divider(),
+      new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:'Análisis generado automáticamente por VisionAir Training Center · Este informe no garantiza la aprobación por parte de AESA',size:18,font:'Arial',color:'888888',italics:true})]})
+    ];
+    
+    const doc=new Document({
+      styles:{
+        default:{document:{run:{font:'Arial',size:22}}},
+        paragraphStyles:[
+          {id:'Heading1',name:'Heading 1',basedOn:'Normal',next:'Normal',quickFormat:true,run:{size:28,bold:true,font:'Arial',color:'1B2D5B'},paragraph:{spacing:{before:240,after:120},outlineLevel:0}},
+          {id:'Heading2',name:'Heading 2',basedOn:'Normal',next:'Normal',quickFormat:true,run:{size:24,bold:true,font:'Arial',color:'1B2D5B'},paragraph:{spacing:{before:180,after:80},outlineLevel:1}}
+        ]
+      },
+      sections:[{
+        properties:{page:{size:{width:11906,height:16838},margin:{top:1134,right:1134,bottom:1134,left:1134}}},
+        children
+      }]
+    });
+    
+    const buffer=await Packer.toBuffer(doc);
+    const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    const fname=(rpt.candidato?rpt.candidato.split(' ').slice(0,2).join('_'):'Informe')+'_Part66_'+cat+'_'+new Date().toISOString().slice(0,10)+'.docx';
+    a.download=fname;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+  }catch(e){
+    alert('Error al generar Word: '+e.message);
+  }finally{
+    const btn=document.getElementById('wordBtn');
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-file-type-doc"></i>Descargar Word';}
+  }
+};
+
+window.toggleCtxPanel=()=>{
+  const panel=document.getElementById('ctxPanelInner');
+  const chevron=document.getElementById('ctxChevron');
+  if(!panel)return;
+  const isOpen=panel.style.display!=='none';
+  panel.style.display=isOpen?'none':'block';
+  if(chevron)chevron.className=isOpen?'ti ti-chevron-down':'ti ti-chevron-up';
+};
+
 function addCtx(txt){
   const ta=document.getElementById('ctxInput');
   if(!ta)return;
@@ -621,14 +1016,13 @@ window.reEvaluar=async()=>{
     const prevRpt=window._lastRpt;
     if(!con)throw new Error('No hay documento en memoria. Por favor realiza el análisis de nuevo.');
     
-    const prompt=buildPrompt();
-    const contextBlock='\n\nCONTEXTO ADICIONAL PROPORCIONADO POR EL EVALUADOR (tiene prioridad sobre el análisis anterior):\n'+ctx+'\n\nANÁLISIS PREVIO (para referencia, puede necesitar corrección según el contexto):\n'+JSON.stringify({puntuacion:prevRpt.puntuacion,estado:prevRpt.estado,experiencia:prevRpt.experiencia,alertas:prevRpt.alertas?.slice(0,5)});
-    
-    let msgs;
-    if(con.t==='pdf'){msgs=[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:con.d}},{type:'text',text:prompt+contextBlock}]}];}
-    else{msgs=[{role:'user',content:prompt+'\n\nDOCUMENTO:\n'+con.d.substring(0,26000)+contextBlock}];}
-    
-    const resp=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:8000,system:'Eres inspector experto LMA Parte 66 AESA. El evaluador ha proporcionado contexto adicional que DEBES tener en cuenta para corregir el análisis. Responde en español con JSON válido únicamente.',messages:msgs})});
+    // Re-evaluation uses the already-extracted data (no re-reading document for counting)
+    // Just re-evaluate with the context note added
+    const extracted=window._lastExtracted;
+    if(!extracted)throw new Error('Datos de extracción no disponibles. Realiza el análisis de nuevo.');
+    const evalPrompt=buildEvaluationPrompt(extracted, ctx);
+    const msgs=[{role:'user',content:evalPrompt}];
+    const resp=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:6000,system:'Eres inspector experto LMA Parte 66 AESA. Los datos están pre-extraídos. El evaluador añade contexto que DEBES considerar. JSON válido únicamente.',messages:msgs})});
     const data=await resp.json();
     if(data.error)throw new Error(data.error.message);
     const rpt=data.content?JSON.parse(data.content.map(i=>i.text||'').join('')):data;
