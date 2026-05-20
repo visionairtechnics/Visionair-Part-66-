@@ -51,7 +51,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         const parsed = JSON.parse(body);
-        if (parsed.max_tokens > 4000) parsed.max_tokens = 4000;
+        if (parsed.max_tokens > 8000) parsed.max_tokens = 8000;
 
         console.log('Llamando a Anthropic...');
         const response = await fetch('https://api.anthropic.com/v1/messages', {
