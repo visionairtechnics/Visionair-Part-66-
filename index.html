@@ -174,6 +174,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
   .card,.verif-card,.action-card,.alert-row{box-shadow:none}
 }
 @media(max-width:580px){.verif-grid{grid-template-columns:1fr 1fr}.ojt-grid{grid-template-columns:repeat(3,1fr)}.cat-grid{grid-template-columns:1fr}}
+.review-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;margin-top:1.5rem}
+.review-panel h3{font-size:15px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:8px}
+.review-panel .sub{font-size:13px;color:var(--text2);margin-bottom:1rem}
+.ctx-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.ctx-tag{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:5px 11px;border-radius:99px;border:1.5px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer;font-family:inherit;transition:all .12s}
+.ctx-tag:hover{border-color:var(--accent);color:var(--accent);background:var(--info-bg)}
+.ctx-tag i{font-size:13px}
+textarea.ctx-input{width:100%;min-height:120px;padding:10px 12px;background:var(--surface2);border:1.5px solid var(--border);border-radius:9px;color:var(--text);font-family:inherit;font-size:13px;line-height:1.6;resize:vertical;outline:none;transition:border-color .15s}
+textarea.ctx-input:focus{border-color:var(--accent)}
+textarea.ctx-input::placeholder{color:var(--text3)}
+.reeval-btn{background:var(--accent);border:none;color:#fff;padding:10px 20px;font-size:13px;font-weight:700;border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-family:inherit;transition:opacity .15s;margin-top:10px}
+.reeval-btn:hover{opacity:.88}
+.reeval-btn:disabled{opacity:.4;cursor:not-allowed}
+.final-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 12px;border-radius:99px;font-weight:700;border:1px solid var(--ok-border);background:var(--ok-bg);color:var(--ok);margin-bottom:14px}
 </style>
 </head>
 <body>
@@ -304,7 +318,9 @@ ${con.d.substring(0,28000)}`}];
     if(data.error)throw new Error(data.error.message);
     await tick(5);
     const rpt=data.content?JSON.parse(data.content.map(i=>i.text||'').join('')):data;
-    setTimeout(()=>showReport(rpt),400);
+    window._lastRpt=rpt;
+window._lastCon=con;
+setTimeout(()=>showReport(rpt,false),400);
   }catch(e){file=null;render('Error al analizar: '+e.message);}
 }
 
@@ -324,7 +340,7 @@ function siEl(ok,na=false){
   return ok===true?`<div class="si si-ok"><i class="ti ti-check" style="font-size:9px"></i></div>`:ok===false?`<div class="si si-err"><i class="ti ti-x" style="font-size:9px"></i></div>`:`<div class="si si-warn"><i class="ti ti-alert-triangle" style="font-size:9px"></i></div>`;
 }
 
-function showReport(rpt){
+function showReport(rpt,isReevaluation=false){
   const exp=rpt.experiencia||{};
   const cfg=rpt.configuracion||{};
   const ver=rpt.verificacion||{};
@@ -349,6 +365,7 @@ function showReport(rpt){
   root().innerHTML=`<div class="fi">
 
 <!-- Cabecera del informe -->
+${isReevaluation?`<div class="final-badge"><i class="ti ti-rosette-discount-check"></i>Informe final — reevaluado con contexto del evaluador</div>`:''}
 <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:1.25rem">
   <div>
     ${rpt.candidato?`<p style="font-size:11px;color:var(--text2);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Candidato</p><p style="font-size:20px;font-weight:800;margin-bottom:4px;letter-spacing:-.02em">${rpt.candidato}</p>`:''}
@@ -470,7 +487,34 @@ ${plan.length?`<div class="sec">
 
 <p style="text-align:center;font-size:11px;color:var(--text3);margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border)">Análisis generado automáticamente por VisionAir Training Center · Este informe no garantiza la aprobación por parte de AESA</p>
 
+</div>
+<div id="reviewPanel"></div>
+`;
+  // Add review panel after report renders
+  setTimeout(()=>{
+    const rp=document.getElementById('reviewPanel');
+    if(!rp||isReevaluation)return;
+    rp.innerHTML=`<div class="review-panel no-print">
+  <h3><i class="ti ti-message-plus" style="color:var(--accent)"></i>Añadir contexto y reevaluar</h3>
+  <p class="sub">¿Hay información que el análisis no ha considerado? Meses vacíos por causa justificada, contexto sobre la organización, aclaraciones sobre alertas... Añádela para obtener un informe final más preciso.</p>
+  <p style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:7px;text-transform:uppercase;letter-spacing:.04em">Añadir contexto rápido</p>
+  <div class="ctx-tags">
+    <button class="ctx-tag" onclick="addCtx('Vacaciones/descanso')"><i class="ti ti-beach"></i>Vacaciones</button>
+    <button class="ctx-tag" onclick="addCtx('Baja médica/incapacidad')"><i class="ti ti-heart-off"></i>Baja médica</button>
+    <button class="ctx-tag" onclick="addCtx('Pandemia COVID-19 (2020-2021)')"><i class="ti ti-virus"></i>Pandemia COVID-19</button>
+    <button class="ctx-tag" onclick="addCtx('Cambio de trabajo/empresa')"><i class="ti ti-briefcase"></i>Cambio de trabajo</button>
+    <button class="ctx-tag" onclick="addCtx('Búsqueda de empleo')"><i class="ti ti-search"></i>Búsqueda de empleo</button>
+    <button class="ctx-tag" onclick="addCtx('Formación/estudios')"><i class="ti ti-school"></i>Formación</button>
+    <button class="ctx-tag" onclick="addCtx('Meses sin acceso a aeronaves')"><i class="ti ti-plane-off"></i>Sin acceso a aeronaves</button>
+    <button class="ctx-tag" onclick="addCtx('Meses con actividad no documentada en este registro')"><i class="ti ti-calendar-off"></i>Actividad no documentada</button>
+  </div>
+  <p style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:7px;text-transform:uppercase;letter-spacing:.04em">Comentarios y contexto adicional</p>
+  <textarea id="ctxInput" class="ctx-input" placeholder="Ej: Los meses de enero-marzo 2020 están vacíos por cierre de la organización durante la pandemia. El supervisor Andres Perez sí tiene número de autorización pero no lo registraba sistemáticamente en el formato. El ATA 72R no aparece porque la organización opera principalmente turbohélice, aunque el candidato también trabaja en un Cessna 172 en otra organización no incluida aquí..."></textarea>
+  <br>
+  <button class="reeval-btn" id="reEvalBtn" onclick="window.reEvaluar()"><i class="ti ti-refresh-alert"></i>Reevaluar con este contexto</button>
+  <p style="font-size:11px;color:var(--text3);margin-top:8px">Se realizará un nuevo análisis del documento teniendo en cuenta tu contexto para generar el informe final corregido.</p>
 </div>`;
+  },200);
 }
 
 function setFile(f){
@@ -550,6 +594,52 @@ ${err?`<div class="err-box"><i class="ti ti-alert-circle"></i>${err}</div>`:''}
 window._expReciente='si';
 window.sExpRec=v=>{window._expReciente=v;render(null);};
 window.sCat=c=>{cat=c;render(null);};
+
+window.addCtx=txt=>{
+  const ta=document.getElementById('ctxInput');
+  if(!ta)return;
+  if(ta.value&&!ta.value.endsWith('\n'))ta.value+='\n';
+  ta.value+=txt+': ';
+  ta.focus();
+};
+
+function addCtx(txt){
+  const ta=document.getElementById('ctxInput');
+  if(!ta)return;
+  if(ta.value&&!ta.value.endsWith('\n'))ta.value+='\n';
+  ta.value+=txt+': ';
+  ta.focus();
+}
+
+window.reEvaluar=async()=>{
+  const ctx=document.getElementById('ctxInput')?.value?.trim();
+  if(!ctx){alert('Por favor añade algún comentario o contexto antes de reevaluar.');return;}
+  const btn=document.getElementById('reEvalBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i>Reevaluando...';}
+  try{
+    const con=window._lastCon;
+    const prevRpt=window._lastRpt;
+    if(!con)throw new Error('No hay documento en memoria. Por favor realiza el análisis de nuevo.');
+    
+    const prompt=buildPrompt();
+    const contextBlock='\n\nCONTEXTO ADICIONAL PROPORCIONADO POR EL EVALUADOR (tiene prioridad sobre el análisis anterior):\n'+ctx+'\n\nANÁLISIS PREVIO (para referencia, puede necesitar corrección según el contexto):\n'+JSON.stringify({puntuacion:prevRpt.puntuacion,estado:prevRpt.estado,experiencia:prevRpt.experiencia,alertas:prevRpt.alertas?.slice(0,5)});
+    
+    let msgs;
+    if(con.t==='pdf'){msgs=[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:con.d}},{type:'text',text:prompt+contextBlock}]}];}
+    else{msgs=[{role:'user',content:prompt+'\n\nDOCUMENTO:\n'+con.d.substring(0,26000)+contextBlock}];}
+    
+    const resp=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:8000,system:'Eres inspector experto LMA Parte 66 AESA. El evaluador ha proporcionado contexto adicional que DEBES tener en cuenta para corregir el análisis. Responde en español con JSON válido únicamente.',messages:msgs})});
+    const data=await resp.json();
+    if(data.error)throw new Error(data.error.message);
+    const rpt=data.content?JSON.parse(data.content.map(i=>i.text||'').join('')):data;
+    window._lastRpt=rpt;
+    showReport(rpt,true);
+    window.scrollTo({top:0,behavior:'smooth'});
+  }catch(e){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-refresh-alert"></i>Reevaluar con este contexto';}
+    alert('Error al reevaluar: '+e.message);
+  }
+};
 window.sForm=f=>{form=f;render(null);};
 render(null);
 </script>
