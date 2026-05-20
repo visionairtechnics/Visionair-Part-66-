@@ -143,11 +143,9 @@ async function analyze(){
     const resp=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:2000,system:'Eres inspector experto LMA Parte 66 AESA. Responde en español con JSON válido únicamente.',messages:msgs})});
     const data=await resp.json();
     if(data.error)throw new Error(data.error.message);
-    const tx=data.content.map(i=>i.text||'').join('');
-    await tick(5);
-    if(!tx||tx.length<10){throw new Error('Respuesta vacía de la API. Intenta con un documento más pequeño.');}
-    const rpt=JSON.parse(tx);
-    setTimeout(()=>showReport(rpt),400);
+    const rpt = data.content ? JSON.parse(data.content.map(i=>i.text||'').join('')) : data;
+await tick(5);
+setTimeout(()=>showReport(rpt),400);
   }catch(e){file=null;render('Error al analizar: '+e.message);}
 }
 
