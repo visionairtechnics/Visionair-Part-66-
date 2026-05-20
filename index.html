@@ -485,12 +485,10 @@ function render(err){
   const canGo=!!(file&&cat&&form&&window._expReciente);
   root().innerHTML=`<div class="up-wrap">
 <h1 class="up-title">Registro de Experiencia Básica</h1>
-<p class="up-sub">Sube el LIC-P66-P01-F02, selecciona la categoría y el tipo de formación del candidato para verificar el cumplimiento según los requisitos de AESA.</p>
+<p class="up-sub">Sube el LIC-P66-P01-F02, selecciona la categoría, el tipo de formación y si deseas evaluar la experiencia reciente.</p>
 
 <div style="margin-bottom:1.5rem">
-  <p class="step-label">0. Tipo de solicitud</p>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:1.5rem">${[['inicial','Emisión inicial','Primera licencia P66'],['mod','Modificación','Ya tengo licencia P66']].map(([k,l,s])=>`<button class="sel-btn${window._tipoSol===k?' sel':''}" onclick="window.sTipo('${k}')"><span style="font-weight:700">${l}</span><span style="display:block;font-size:11px;color:var(--text3);font-weight:400;margin-top:1px">${s}</span></button>`).join('')}</div>
-<p class="step-label">1. Categoría de licencia</p>
+  <p class="step-label">1. Categoría de licencia</p>
   <div class="cat-grid">${Object.entries(CATS).map(([k,v])=>`<button class="sel-btn${cat===k?' sel':''}" onclick="window.sCat('${k}')">${v.label}</button>`).join('')}</div>
 </div>
 
@@ -499,18 +497,28 @@ function render(err){
   <div style="display:flex;flex-direction:column;gap:7px">${Object.entries(FORMACIONES).map(([k,v])=>`<button class="sel-btn${form===k?' sel-ok sel':''}" onclick="window.sForm('${k}')">
     <span style="font-weight:700">${v.label}</span>
     <span style="display:block;font-size:11px;color:var(--text3);font-weight:400;margin-top:1px">${v.sub}</span>
-    ${cat?`<span style="display:block;font-size:11px;font-weight:700;margin-top:2px;color:${form===k?'inherit':'var(--text2)'}">Requiere ${CATS[cat]?.m[k]||'—'} meses</span>`:''}
+    ${cat?`<span style="display:block;font-size:11px;font-weight:700;margin-top:2px;color:${form===k?'inherit':'var(--text3)'}">Requiere ${CATS[cat]?.m[k]||'—'} meses</span>`:''}
   </button>`).join('')}</div>
   ${cat&&form?`<div class="info-box"><i class="ti ti-info-circle" style="font-size:12px;vertical-align:-1px;margin-right:3px"></i>Vía seleccionada: <strong>${FORMACIONES[form].label}</strong> → se requieren <strong>${getReqMonths()} meses</strong> de experiencia válida para ${cat}</div>`:''}
 </div>
 
-<div style="margin-bottom:1.25rem">
-  <div style="margin-bottom:1.5rem">
-  <p class="step-label">2b. Validar experiencia reciente</p>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">${[['si','Sí, incluir','Requisito obligatorio para presentar a AESA'],['no','No incluir','Solo evaluar experiencia total (ver potencial)']].map(([k,l,s])=>`<button class="sel-btn${window._expReciente===k?' sel-ok sel':''}" onclick="window.sExpRec('${k}')"><span style="font-weight:700">${l}</span><span style="display:block;font-size:11px;color:var(--text3);font-weight:400;margin-top:1px">${s}</span></button>`).join('')}</div>
-  ${window._expReciente==='no'?'<div class="info-box" style="background:var(--warn-bg);border-color:var(--warn-border);color:var(--warn)"><i class="ti ti-info-circle" style="font-size:12px;vertical-align:-1px;margin-right:3px"></i>Modo potencial: no se evaluará si cumple experiencia reciente. Útil para candidatos que aún están acumulando experiencia.</div>':''}
+<div style="margin-bottom:1.5rem">
+  <p class="step-label">3. Validar experiencia reciente</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+    <button class="sel-btn${window._expReciente==='si'?' sel-ok sel':''}" onclick="window.sExpRec('si')">
+      <span style="font-weight:700">Sí, incluir</span>
+      <span style="display:block;font-size:11px;color:var(--text3);font-weight:400;margin-top:1px">Requisito obligatorio para presentar a AESA</span>
+    </button>
+    <button class="sel-btn${window._expReciente==='no'?' sel sel':''}" onclick="window.sExpRec('no')">
+      <span style="font-weight:700">No incluir</span>
+      <span style="display:block;font-size:11px;color:var(--text3);font-weight:400;margin-top:1px">Solo evaluar experiencia total (ver potencial)</span>
+    </button>
+  </div>
+  ${window._expReciente==='no'?`<div class="info-box" style="background:var(--warn-bg);border-color:var(--warn-border);color:var(--warn);margin-top:7px"><i class="ti ti-info-circle" style="font-size:12px;vertical-align:-1px;margin-right:3px"></i>Modo potencial: no se evaluará si cumple experiencia reciente. Útil para candidatos que aún están acumulando experiencia.</div>`:''}
 </div>
-<p class="step-label">3. Registro de experiencia</p>
+
+<div style="margin-bottom:1.25rem">
+  <p class="step-label">4. Registro de experiencia</p>
   <div id="dz" class="dz" style="${file?'margin-bottom:10px':''}">
     <input type="file" id="fi" accept=".pdf,.docx,.doc,.xlsx,.xls,.csv" style="display:none">
     <i class="ti ti-upload dz-ico"></i>
@@ -522,7 +530,7 @@ function render(err){
 
 ${err?`<div class="err-box"><i class="ti ti-alert-circle"></i>${err}</div>`:''}
 
-<button class="btn-p" id="ab" ${!canGo?'disabled':''}><i class="ti ti-search"></i>${!cat?'Selecciona la categoría':!form?'Selecciona el tipo de formación':!file?'Sube el registro':'Analizar con requisitos AESA'}</button>
+<button class="btn-p" id="ab" ${!canGo?'disabled':''}><i class="ti ti-search"></i>${!cat?'Selecciona la categoría':!form?'Selecciona el tipo de formación':!window._expReciente?'Indica si evaluar experiencia reciente':!file?'Sube el registro':'Analizar con requisitos AESA'}</button>
 
 <div class="tags">${['AESA España','B1.1·B1.2·B1.3·B2','≥5 tareas/mes','OJT: INS/FOT/SGH/R-I/MEL/TS','Firmas por página'].map(t=>`<span class="badge b-grey">${t}</span>`).join('')}</div>
 </div>`;
@@ -539,8 +547,6 @@ ${err?`<div class="err-box"><i class="ti ti-alert-circle"></i>${err}</div>`:''}
   if(ab)ab.addEventListener('click',()=>{if(canGo)analyze();});
 }
 
-window._tipoSol=null;
-window.sTipo=t=>{window._tipoSol=t;render(null);};
 window._expReciente='si';
 window.sExpRec=v=>{window._expReciente=v;render(null);};
 window.sCat=c=>{cat=c;render(null);};
