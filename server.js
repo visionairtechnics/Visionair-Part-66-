@@ -2,7 +2,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { jsonrepair } = require('jsonrepair');
-
+// Increase body size limit
+const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50MB
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -37,7 +38,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && req.url === '/analizar') {
     let body = '';
-    req.on('data', chunk => body += chunk.toString());
+    req.on('data', chunk => {
+  body += chunk.toString();
+  if (body.length > MAX_BODY_SIZE) req.destroy();
+});
     req.on('end', async () => {
       try {
         if (!API_KEY) {
@@ -47,7 +51,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         const parsed = JSON.parse(body);
-        if (parsed.max_tokens > 3000) parsed.max_tokens = 3000;
+        if (parsed.max_tokens > 4000) parsed.max_tokens = 4000;
 
         console.log('Llamando a Anthropic...');
         const response = await fetch('https://api.anthropic.com/v1/messages', {
