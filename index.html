@@ -273,7 +273,9 @@ function buildPrompt(){
     '',
     'REGLAS AESA — SIGUE ESTAS INSTRUCCIONES AL PIE DE LA LETRA:',
     '',
-    'REGLA 1 - MESES VALIDOS: Un mes es VALIDO si tiene entradas en al menos 5 DIAS DISTINTOS de ese mes.',
+    'REGLA 1 - MESES VALIDOS — LEE EL DOCUMENTO LINEA A LINEA SIN SALTARTE NINGUNA ENTRADA:',
+    'Revisa el documento de principio a FIN, entrada por entrada, sin omitir ninguna.',
+    'Un mes es VALIDO si tiene entradas en al menos 5 DIAS DISTINTOS de ese mes.',
     'PROCESO OBLIGATORIO: Lee el documento de principio a FIN. Para CADA mes calendario desde el inicio hasta',
     'el ultimo mes del registro (incluyendo meses sin entradas), anota que dias del mes tienen al menos una entrada.',
     'Un mes valido = al menos 5 dias distintos con entradas. NO cuentes entradas totales, cuenta DIAS UNICOS.',
@@ -417,10 +419,22 @@ function buildEvaluationPrompt(extracted, contextNote=''){
 async function readFile(f){
   const ext=f.name.split('.').pop().toLowerCase();
   if(ext==='pdf')return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res({t:'pdf',d:r.result.split(',')[1]});r.onerror=rej;r.readAsDataURL(f);});
-  if(['xlsx','xls','csv'].includes(ext))return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'binary'});let tx='LIC-P66-P01-F02 — '+f.name+'\n\n';wb.SheetNames.forEach(n=>{tx+='=== '+n+' ===\n'+XLSX.utils.sheet_to_csv(wb.Sheets[n])+'\n\n';});res({t:'text',d:tx});}catch(err){rej(err);}};r.onerror=rej;r.readAsBinaryString(f);});
+  if(['xlsx','xls','csv'].includes(ext))return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'binary'});let tx='LIC-P66-P01-F02 — '+f.name+'\n\n';wb.SheetNames.forEach(n=>{tx+='=== '+n+' ===\n'+XLSX.utils.sheet_to_csv(wb.Sheets[n])+'\n\n';});const b64r2=new FileReader();
+        b64r2.onload=ev2=>res({t:'text',d:tx,d64:ev2.target.result.split(',')[1]});
+        b64r2.readAsDataURL(new Blob([e.target.result]));}catch(err){rej(err);}};r.onerror=rej;r.readAsBinaryString(f);});
   if(['docx','doc'].includes(ext)){
     if(!window.mammoth)await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
-    return new Promise((res,rej)=>{const r=new FileReader();r.onload=async e=>{try{const out=await window.mammoth.extractRawText({arrayBuffer:e.target.result});res({t:'text',d:out.value});}catch(e2){rej(e2);}};r.onerror=rej;r.readAsArrayBuffer(f);});
+    return new Promise((res,rej)=>{const r=new FileReader();r.onload=async e=>{
+      try{
+        // Get base64 for MarkItDown
+        const b64r=new FileReader();
+        b64r.onload=async ev=>{
+          const b64=ev.target.result.split(',')[1];
+          const out=await window.mammoth.extractRawText({arrayBuffer:e.target.result});
+          res({t:'text',d:out.value,d64:b64});
+        };
+        b64r.readAsDataURL(new Blob([e.target.result]));
+      }catch(e2){rej(e2);}};r.onerror=rej;r.readAsArrayBuffer(f);});
   }
   return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res({t:'text',d:e.target.result});r.onerror=rej;r.readAsText(f);});
 }
@@ -433,18 +447,58 @@ async function analyze(){
     const con=await readFile(file);
     window._lastCon=con;
     window._lastExtracted=null;
+
+    // ── Pre-procesado con MarkItDown (servidor) ──────────────
+    // Convierte PDF/DOCX/XLSX a Markdown estructurado antes de
+    // enviarlo a Claude, mejorando la precisión del análisis
     await tick(2);
+    let markdownText = null;
+    const ext=file.name.split('.').pop().toLowerCase();
+    const canConvert=['pdf','docx','doc','xlsx','xls','csv'].includes(ext);
+    if(canConvert){
+      try{
+        const convResp=await fetch('/convertir',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({type:ext, content:con.d64||con.d})
+        });
+        const convData=await convResp.json();
+        if(convData.text && convData.text.length > 100){
+          markdownText=convData.text;
+          console.log('MarkItDown OK:',markdownText.length,'chars');
+        }
+      }catch(e){
+        console.warn('MarkItDown no disponible, usando texto directo:', e.message);
+      }
+    }
+
+    // ── Construir mensaje para Claude ────────────────────────
+    await tick(3);
     const prompt=buildPrompt();
     let msgs;
-    if(con.t==='pdf'){
-      msgs=[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:con.d}},{type:'text',text:prompt}]}];
+
+    if(markdownText){
+      // Usar texto Markdown estructurado (más preciso)
+      const docText='DOCUMENTO (convertido a Markdown para mayor precision):\n\n'+markdownText.substring(0,60000);
+      msgs=[{role:'user',content:prompt+'\n\n'+docText}];
+    } else if(con.t==='pdf'){
+      // PDF directo a Claude (fallback)
+      msgs=[{role:'user',content:[
+        {type:'document',source:{type:'base64',media_type:'application/pdf',data:con.d}},
+        {type:'text',text:prompt}
+      ]}];
     } else {
-      // For text files, send as much as possible
-      msgs=[{role:'user',content:prompt+'\n\nDOCUMENTO COMPLETO:\n'+con.d.substring(0,55000)}];
+      // Texto plano (fallback)
+      msgs=[{role:'user',content:prompt+'\n\nDOCUMENTO:\n'+con.d.substring(0,55000)}];
     }
-    await tick(3);
+
     await tick(4);
-    const resp=await fetch('/analizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:MODEL,max_tokens:8000,system:'Eres inspector experto LMA Parte 66 AESA. Responde en espanol con JSON valido unicamente.',messages:msgs})});
+    const resp=await fetch('/analizar',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:MODEL,max_tokens:8000,
+        system:'Eres inspector experto LMA Parte 66 AESA. Responde en espanol con JSON valido unicamente.',
+        messages:msgs})
+    });
     const data=await resp.json();
     if(data.error)throw new Error(data.error.message);
     await tick(5);
@@ -452,7 +506,14 @@ async function analyze(){
     window._lastRpt=rpt;
     window._lastExtracted={mesesDetalle:rpt.mesesDetalle,totalEntradas:rpt.experiencia?.totalEntradas};
     setTimeout(()=>showReport(rpt,false),400);
-  }catch(e){file=null;render('Error al analizar: '+e.message);}
+  }catch(e){
+    file=null;
+    let msg=e.message||'Error desconocido';
+    if(msg.includes('terminated')||msg.includes('Failed to fetch')){
+      msg='El servidor no respondió. Verifica que Render esté activo (puede tardar 50s en arrancar) y que la API key esté configurada.';
+    }
+    render('Error al analizar: '+msg);
+  }
 }
 
 function spinHTML(step){
@@ -737,6 +798,18 @@ ${err?`<div class="err-box"><i class="ti ti-alert-circle"></i>${err}</div>`:''}
 window._expReciente='si';
 window.sExpRec=v=>{window._expReciente=v;render(null);};
 window.sCat=c=>{cat=c;render(null);};
+
+// Check server health on load
+(async()=>{
+  try{
+    const r=await fetch('/estado');
+    const d=await r.json();
+    if(!d.apiKey){console.warn('API Key no configurada en servidor');}
+    if(d.markitdown){console.log('MarkItDown disponible en servidor');}
+    else{console.log('MarkItDown no disponible, se usará modo directo');}
+    window._serverMarkitdown=d.markitdown;
+  }catch(e){console.warn('Servidor no responde al health check');}
+})();
 
 window.addCtx=txt=>{
   const ta=document.getElementById('ctxInput');
